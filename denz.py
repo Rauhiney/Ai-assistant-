@@ -9,7 +9,6 @@ import random
 import requests
 import os
 import pytz
-from timezonefinder import TimezoneFinder
 import threading
 import time
 import re
@@ -78,7 +77,6 @@ weather_cache = {}
 response_cache = {}
 pending_weather_requests = {}
 conversation_memory = {}
-timezone_finder = TimezoneFinder()
 
 WEATHER_KEYWORDS = ('weather', 'temperature', 'forecast', 'rain', 'cloud', 'humidity', 'wind')
 NON_LOCATION_WORDS = {
