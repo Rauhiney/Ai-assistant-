@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DENZ 3D Chat - Interact with AI through immersive 3D interface">
+    <meta name="theme-color" content="#0a0e27">
+    <title>DENZ 3D Chat | Full 3D Experience</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="chat-page">
+    <!-- 3D Background Canvas -->
+    <div id="three-canvas-chat" class="three-d-canvas-chat"></div>
+
+    <!-- Navigation -->
+    <nav class="navbar navbar-chat">
+        <div class="navbar-container">
+            <div class="logo-section">
+                <a href="/">
+                    <h1 class="logo">
+                        <span class="logo-icon">⚡</span>
+                        <span class="logo-text">DENZ</span>
+                    </h1>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item"><a href="/" class="nav-link">Experience</a></li>
+                <li class="nav-item"><a href="/chat" class="nav-link active">Chat</a></li>
+                <li class="nav-item"><a href="/about" class="nav-link">About</a></li>
+                <li class="nav-item"><a href="#" class="nav-link theme-toggle" id="theme-toggle">🌙</a></li>
+            </ul>
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Chat Layout -->
+    <div class="chat-layout">
+        <!-- Left Side: 3D Avatar -->
+        <div class="chat-3d-section">
+            <div class="avatar-3d-container" id="avatar-3d-container"></div>
+
+            <div class="mini-map-card" aria-label="Map preview">
+                <iframe
+                    id="mini-map-frame"
+                    title="Location map"
+                    loading="lazy"
+                    referrerpolicy="no-referrer-when-downgrade"
+                    src="https://www.openstreetmap.org/export/embed.html?bbox=68.0%2C6.0%2C98.0%2C37.5&amp;layer=mapnik&amp;marker=20.5937%2C78.9629">
+                </iframe>
+            </div>
+            
+            <div class="avatar-stats">
+                <div class="stat-3d">
+                    <span class="stat-label">Particles</span>
+                    <span class="stat-value" id="avatar-particles">0</span>
+                </div>
+                <div class="stat-3d">
+                    <span class="stat-label">Status</span>
+                    <span class="stat-value" id="avatar-status">Ready</span>
+                </div>
+                <div class="stat-3d">
+                    <span class="stat-label">FPS</span>
+                    <span class="stat-value" id="avatar-fps">60</span>
+                </div>
+            </div>
+
+            <div class="avatar-controls">
+                <button class="control-btn" id="morph-btn" title="Morph Shape">
+                    <i class="fas fa-cube"></i>
+                </button>
+                <button class="control-btn" id="rotate-btn" title="Rotate">
+                    <i class="fas fa-redo"></i>
+                </button>
+                <button class="control-btn" id="emit-btn" title="Emit Particles">
+                    <i class="fas fa-circle"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Right Side: Chat Interface -->
+        <div class="chat-interface-section">
+            <!-- Chat Header -->
+            <div class="chat-header-3d">
+                <h2>3D Chat Interface</h2>
+                <p id="chat-time">00:00</p>
+            </div>
+
+            <!-- Chat Messages -->
+            <div class="chat-messages-3d" id="chat-messages-3d">
+                <div class="chat-welcome-3d">
+                    <div class="welcome-icon-3d">
+                        <i class="fas fa-cube"></i>
+                    </div>
+                    <h3>Welcome to DENZ 3D Chat</h3>
+                    <p>Interact with AI in a fully immersive 3D environment</p>
+                    <div class="welcome-suggestions">
+                        <button class="suggestion-btn" data-question="What is your 3D design?">
+                            <i class="fas fa-cube"></i>
+                            <span>3D Design</span>
+                        </button>
+                        <button class="suggestion-btn" data-question="Show me particles">
+                            <i class="fas fa-circle"></i>
+                            <span>Particles</span>
+                        </button>
+                        <button class="suggestion-btn" data-question="Morph geometry">
+                            <i class="fas fa-triangle"></i>
+                            <span>Morphing</span>
+                        </button>
+                        <button class="suggestion-btn" data-question="How are you?">
+                            <i class="fas fa-smile"></i>
+                            <span>Status</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Input -->
+            <div class="chat-input-3d-section">
+                <div class="input-controls">
+                    <button class="input-control-btn" id="voice-btn" title="Voice Input">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <button class="input-control-btn" id="settings-btn" title="Settings">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+
+                <div class="input-wrapper">
+                    <input 
+                        type="text"
+                        id="chat-input-3d"
+                        class="chat-input-3d"
+                        placeholder="Type to chat with DENZ..."
+                        autocomplete="off"
+                    >
+                    <button class="send-btn-3d" id="send-btn-3d">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+
+                <div class="input-meta-3d">
+                    <span id="char-count">0/500</span>
+                    <span id="typing-indicator" class="typing-3d" style="display: none;">
+                        <span class="dot"></span>
+                        <span class="dot"></span>
+                        <span class="dot"></span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-3d" id="settings-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content-3d">
+            <div class="modal-header-3d">
+                <h2>3D Settings</h2>
+                <button class="modal-close" id="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body-3d">
+                <div class="setting-group">
+                    <label>
+                        <input type="checkbox" id="particle-toggle" checked>
+                        <span>Enable Particles</span>
+                    </label>
+                </div>
+                <div class="setting-group">
+                    <label>
+                        <input type="checkbox" id="morph-toggle" checked>
+                        <span>Enable Morphing</span>
+                    </label>
+                </div>
+                <div class="setting-group">
+                    <label>
+                        <input type="checkbox" id="auto-scroll-toggle" checked>
+                        <span>Auto-scroll Chat</span>
+                    </label>
+                </div>
+                <div class="setting-group">
+                    <label for="geometry-select">3D Shape:</label>
+                    <select id="geometry-select">
+                        <option value="sphere">Sphere</option>
+                        <option value="torus">Torus</option>
+                        <option value="icosahedron">Icosahedron</option>
+                        <option value="tetrahedron">Tetrahedron</option>
+                        <option value="octahedron">Octahedron</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div class="context-menu-3d" id="context-menu-3d">
+        <div class="menu-item" data-action="morph">Morph</div>
+        <div class="menu-item" data-action="rotate">Rotate</div>
+        <div class="menu-item" data-action="emit">Emit Particles</div>
+        <div class="menu-item" data-action="scale">Scale</div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container-3d" id="toast-container-3d"></div>
+
+    <!-- Loading Screen -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p>Initializing 3D Chat...</p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="/static/js/script.js"></script>
+</body>
+</html>

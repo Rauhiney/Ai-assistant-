@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="About DENZ - 3D Virtual AI Assistant built with Three.js and WebGL">
+    <meta name="theme-color" content="#0a0e27">
+    <title>About DENZ | 3D Virtual Assistant</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="about-page">
+    <!-- 3D Background -->
+    <div id="three-canvas-about" class="three-d-canvas-about"></div>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="navbar-container">
+            <div class="logo-section">
+                <a href="/">
+                    <h1 class="logo">
+                        <span class="logo-icon">⚡</span>
+                        <span class="logo-text">DENZ</span>
+                    </h1>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item"><a href="/" class="nav-link">Experience</a></li>
+                <li class="nav-item"><a href="/chat" class="nav-link">Chat</a></li>
+                <li class="nav-item"><a href="/about" class="nav-link active">About</a></li>
+                <li class="nav-item"><a href="#" class="nav-link theme-toggle" id="theme-toggle">🌙</a></li>
+            </ul>
+            <div class="hamburger">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="about-main">
+        <!-- Hero Section -->
+        <section class="about-hero-3d">
+            <h1>About DENZ</h1>
+            <p>A Full 3D Virtual AI Assistant Experience</p>
+        </section>
+
+        <!-- Overview Section -->
+        <section class="about-section-3d">
+            <div class="section-content">
+                <h2>What is DENZ?</h2>
+                <p>
+                    DENZ is a groundbreaking 3D virtual assistant that combines cutting-edge web technologies
+                    with artificial intelligence to create an entirely immersive, interactive experience.
+                    Built with Three.js, WebGL, and custom GLSL shaders, DENZ represents the convergence
+                    of advanced 3D graphics and conversational AI.
+                </p>
+                <p>
+                    Unlike traditional interfaces, DENZ exists in a fully 3D environment where every
+                    interaction is visually represented through morphing geometries, particle systems,
+                    and real-time animations. This creates a truly futuristic and engaging way to
+                    interact with artificial intelligence.
+                </p>
+            </div>
+        </section>
+
+        <!-- 3D Features Section -->
+        <section class="about-section-3d features-detailed">
+            <h2>3D Capabilities</h2>
+            <div class="features-detailed-grid">
+                <div class="feature-detailed">
+                    <div class="feature-icon-3d">
+                        <i class="fas fa-cube"></i>
+                    </div>
+                    <h3>Morphing Geometry</h3>
+                    <p>
+                        Real-time procedural geometry that morphs between different shapes.
+                        Using advanced vertex shaders and morphing algorithms, objects smoothly
+                        transition between spheres, toruses, icosahedrons, and custom geometries.
+                    </p>
+                </div>
+
+                <div class="feature-detailed">
+                    <div class="feature-icon-3d">
+                        <i class="fas fa-circle"></i>
+                    </div>
+                    <h3>Particle Systems</h3>
+                    <p>
+                        GPU-accelerated particle systems capable of rendering 10,000+ particles
+                        simultaneously. Each particle has physics simulation, including gravity,
+                        wind, and collision detection for realistic motion.
+                    </p>
+                </div>
+
+                <div class="feature-detailed">
+                    <div class="feature-icon-3d">
+                        <i class="fas fa-wand-magic-sparkles"></i>
+                    </div>
+                    <h3>Custom Shaders</h3>
+                    <p>
+                        Advanced GLSL vertex and fragment shaders for stunning visual effects.
+                        Including Phong lighting, Toon shading, volumetric effects, and procedural
+                        noise-based animations.
+                    </p>
+                </div>
+
+                <div class="feature-detailed">
+                    <div class="feature-icon-3d">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <h3>Real-time Rendering</h3>
+                    <p>
+                        Optimized WebGL rendering achieving 60+ FPS on modern devices.
+                        Uses buffer geometry, instanced rendering, and GPU acceleration
+                        for maximum performance.
+                    </p>
+                </div>
+
+                <div class="feature-detailed">
+                    <div class="feature-icon-3d">
+                        <i class="fas fa-spider"></i>
+                    </div>
+                    <h3>Physics Engine</h3>
+                    <p>
+                        Integrated physics simulation for interactive 3D elements.
+                        Includes rigid body dynamics, collision detection, and constraint-based animation
+                        for realistic physical behavior.
+                    </p>
+                </div>
+
+                <div class="feature-detailed">
+                    <div class="feature-icon-3d">
+                        <i class="fas fa-globe"></i>
+                    </div>
+                    <h3>WebGL Technology</h3>
+                    <p>
+                        Cross-platform 3D graphics powered by WebGL and Three.js.
+                        Works on desktop, tablet, and mobile devices without requiring
+                        plugins or external software.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Technology Stack Section -->
+        <section class="about-section-3d tech-stack-detailed">
+            <h2>Technology Stack</h2>
+            <div class="tech-breakdown">
+                <div class="tech-category">
+                    <h3><i class="fab fa-js"></i> Frontend Technologies</h3>
+                    <ul>
+                        <li><strong>Three.js</strong> - 3D graphics library</li>
+                        <li><strong>WebGL</strong> - Hardware-accelerated graphics</li>
+                        <li><strong>GSAP</strong> - Animation library</li>
+                        <li><strong>Babel</strong> - JavaScript compiler</li>
+                        <li><strong>React</strong> - UI framework (optional)</li>
+                    </ul>
+                </div>
+
+                <div class="tech-category">
+                    <h3><i class="fab fa-python"></i> Backend Technologies</h3>
+                    <ul>
+                        <li><strong>Flask</strong> - Web framework</li>
+                        <li><strong>Python 3.9+</strong> - Programming language</li>
+                        <li><strong>NumPy</strong> - Numerical computing</li>
+                        <li><strong>REST API</strong> - Data endpoint</li>
+                        <li><strong>JSON</strong> - Data format</li>
+                    </ul>
+                </div>
+
+                <div class="tech-category">
+                    <h3><i class="fas fa-cube"></i> 3D Technologies</h3>
+                    <ul>
+                        <li><strong>Custom GLSL Shaders</strong> - Vertex and fragment shaders</li>
+                        <li><strong>GPU Instancing</strong> - Efficient rendering</li>
+                        <li><strong>Buffer Geometry</strong> - Optimized geometry</li>
+                        <li><strong>Morph Targets</strong> - Shape interpolation</li>
+                        <li><strong>Post Processing</strong> - Visual effects</li>
+                    </ul>
+                </div>
+
+                <div class="tech-category">
+                    <h3><i class="fas fa-chart-line"></i> Performance</h3>
+                    <ul>
+                        <li><strong>60+ FPS</strong> - Target frame rate</li>
+                        <li><strong>GPU Acceleration</strong> - Parallel processing</li>
+                        <li><strong>LOD System</strong> - Level of detail</li>
+                        <li><strong>Culling</strong> - Invisible object optimization</li>
+                        <li><strong>Compressed Assets</strong> - Optimized file sizes</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- Architecture Section -->
+        <section class="about-section-3d architecture">
+            <h2>System Architecture</h2>
+            <div class="architecture-diagram">
+                <div class="arch-layer">
+                    <h3>Client Layer</h3>
+                    <p>Three.js | WebGL | GSAP | DOM</p>
+                </div>
+                <div class="arch-arrow"><i class="fas fa-arrow-down"></i></div>
+                <div class="arch-layer">
+                    <h3>3D Rendering Layer</h3>
+                    <p>Vertex Shaders | Fragment Shaders | Geometry</p>
+                </div>
+                <div class="arch-arrow"><i class="fas fa-arrow-down"></i></div>
+                <div class="arch-layer">
+                    <h3>API Layer</h3>
+                    <p>REST Endpoints | WebSockets | Data Streaming</p>
+                </div>
+                <div class="arch-arrow"><i class="fas fa-arrow-down"></i></div>
+                <div class="arch-layer">
+                    <h3>Backend Layer</h3>
+                    <p>Flask Server | Python Logic | AI Engine</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Performance Metrics -->
+        <section class="about-section-3d metrics">
+            <h2>Performance Metrics</h2>
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-number">10,000+</div>
+                    <div class="metric-label">Particles</div>
+                    <p>GPU-accelerated particles with physics</p>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-number">60+</div>
+                    <div class="metric-label">FPS</div>
+                    <p>Smooth 60+ frames per second</p>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-number">5000</div>
+                    <div class="metric-label">Vertices</div>
+                    <p>Complex morphing geometry</p>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-number">< 3s</div>
+                    <div class="metric-label">Load Time</div>
+                    <p>Optimized asset loading</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Development Timeline -->
+        <section class="about-section-3d timeline">
+            <h2>Development Timeline</h2>
+            <div class="timeline-items">
+                <div class="timeline-item">
+                    <div class="timeline-marker"></div>
+                    <div class="timeline-content">
+                        <h3>Concept & Design</h3>
+                        <p>Initial design and 3D concept planning based on Active Theory aesthetics</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-marker"></div>
+                    <div class="timeline-content">
+                        <h3>Core Development</h3>
+                        <p>Backend API and Three.js scene setup</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-marker"></div>
+                    <div class="timeline-content">
+                        <h3>3D Implementation</h3>
+                        <p>Morphing geometry, particle systems, and shaders</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-marker"></div>
+                    <div class="timeline-content">
+                        <h3>Optimization</h3>
+                        <p>Performance tuning and GPU optimization</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-marker"></div>
+                    <div class="timeline-content">
+                        <h3>Launch</h3>
+                        <p>Full 3D virtual assistant release</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Call to Action -->
+        <section class="about-cta-3d">
+            <h2>Experience DENZ Today</h2>
+            <p>Dive into the future of AI interaction</p>
+            <a href="/chat" class="btn btn-large">
+                <span>Start 3D Chat</span>
+                <i class="fas fa-rocket"></i>
+            </a>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer-3d">
+        <div class="footer-content">
+            <div class="footer-section">
+                <h3>DENZ 3D</h3>
+                <p>The future of AI interaction through immersive 3D visualization</p>
+            </div>
+            <div class="footer-section">
+                <h3>Quick Links</h3>
+                <ul>
+                    <li><a href="/">Experience</a></li>
+                    <li><a href="/chat">Chat</a></li>
+                    <li><a href="/about">About</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h3>Resources</h3>
+                <ul>
+                    <li><a href="#">Documentation</a></li>
+                    <li><a href="#">GitHub</a></li>
+                    <li><a href="#">Contact</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>&copy; 2026 DENZ 3D Virtual Assistant. Built with WebGL and AI.</p>
+        </div>
+    </footer>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p>Loading 3D Experience...</p>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/simplex-noise@3.0.0/dist/simplex-noise.js"></script>
+    <script src="/static/js/script.js"></script>
+</body>
+</html>
