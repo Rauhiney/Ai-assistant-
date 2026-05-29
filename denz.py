@@ -564,11 +564,6 @@ def get_timezone_from_coords(latitude, longitude):
     if not latitude or not longitude:
         return "UTC"
 
-    try:
-        return timezone_finder.timezone_at(lat=latitude, lng=longitude) or "UTC"
-    except Exception as e:
-        return "UTC"
-
 
 def get_local_time(timezone):
     """Get local time"""
