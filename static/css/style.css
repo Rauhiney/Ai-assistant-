@@ -1,15 +1,15 @@
 :root {
     /* Color Palette - 3D Theme */
-    --primary-3d: #4a9eff;
+    --primary-3d: #8b5cf6;
     --secondary-3d: #ff6b9d;
     --accent-3d: #00ff88;
-    --dark-3d: #0a0e27;
-    --darker-3d: #050810;
+    --dark-3d: #000000;
+    --darker-3d: #000000;
     --card-bg-3d: rgba(20, 30, 60, 0.4);
     --text-primary: #ffffff;
     --text-secondary: rgba(255, 255, 255, 0.7);
     --text-tertiary: rgba(255, 255, 255, 0.4);
-    --border-3d: rgba(74, 158, 255, 0.2);
+    --border-3d: rgba(139, 92, 246, 0.2);
 
     /* Spacing */
     --sp-xs: 0.5rem;
@@ -59,7 +59,7 @@ body {
 }
 
 body.light-mode {
-    --primary-3d: #1267d8;
+    --primary-3d: #7c3aed;
     --secondary-3d: #d9367d;
     --accent-3d: #008f5a;
     --dark-3d: #f7fbff;
@@ -68,7 +68,7 @@ body.light-mode {
     --text-primary: #101828;
     --text-secondary: rgba(16, 24, 40, 0.72);
     --text-tertiary: rgba(16, 24, 40, 0.48);
-    --border-3d: rgba(18, 103, 216, 0.24);
+    --border-3d: rgba(124, 58, 237, 0.24);
     background: #f7fbff;
 }
 
@@ -115,7 +115,7 @@ body.light-mode .bot-message .message-content,
 body.light-mode .suggestion-btn,
 body.light-mode .control-btn,
 body.light-mode .input-control-btn {
-    background: rgba(18, 103, 216, 0.08);
+    background: rgba(124, 58, 237, 0.08);
 }
 
 body.light-mode .chat-input-3d,
@@ -141,12 +141,12 @@ body.light-mode .user-message .message-content {
 
 @keyframes glow-pulse-3d {
     0%, 100% { 
-        box-shadow: 0 0 10px rgba(74, 158, 255, 0.3),
-                    inset 0 0 10px rgba(74, 158, 255, 0.1);
+        box-shadow: 0 0 10px rgba(139, 92, 246, 0.3),
+                    inset 0 0 10px rgba(139, 92, 246, 0.1);
     }
     50% { 
-        box-shadow: 0 0 30px rgba(74, 158, 255, 0.8),
-                    inset 0 0 20px rgba(74, 158, 255, 0.3);
+        box-shadow: 0 0 30px rgba(139, 92, 246, 0.8),
+                    inset 0 0 20px rgba(139, 92, 246, 0.3);
     }
 }
 
@@ -219,8 +219,9 @@ body.light-mode .user-message .message-content {
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: 0;
-    background: linear-gradient(135deg, var(--dark-3d), var(--darker-3d));
+    z-index: 1;
+    background: transparent;
+    pointer-events: none;
 }
 
 .three-d-canvas canvas,
@@ -241,8 +242,9 @@ body.light-mode .user-message .message-content {
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: -1;
+    z-index: 0;
     overflow: hidden;
+    pointer-events: none;
 }
 
 .starfield {
@@ -256,7 +258,7 @@ body.light-mode .user-message .message-content {
                 radial-gradient(2px 2px at 90px 10px, white, rgba(255, 255, 255, 0.3));
     background-repeat: repeat;
     background-size: 200px 200px;
-    opacity: 0.3;
+    opacity: 0.45;
     animation: float-3d 20s ease-in-out infinite;
 }
 
@@ -264,7 +266,7 @@ body.light-mode .user-message .message-content {
     position: absolute;
     width: 100%;
     height: 100%;
-    opacity: 0.3;
+    opacity: 0.9;
 }
 
 /* ============================================================================
@@ -502,14 +504,14 @@ body.light-mode .user-message .message-content {
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, var(--primary-3d), #2a7def);
+    background: linear-gradient(135deg, var(--primary-3d), #a855f7);
     color: white;
-    box-shadow: 0 4px 15px rgba(74, 158, 255, 0.3);
+    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
 }
 
 .btn-primary:hover {
     transform: translateY(-3px);
-    box-shadow: 0 6px 25px rgba(74, 158, 255, 0.5);
+    box-shadow: 0 6px 25px rgba(139, 92, 246, 0.5);
 }
 
 .btn-secondary {
@@ -635,11 +637,11 @@ body.light-mode .user-message .message-content {
 }
 
 .card-3d-front {
-    background: linear-gradient(135deg, rgba(74, 158, 255, 0.15), rgba(255, 107, 157, 0.1));
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(255, 107, 157, 0.1));
 }
 
 .card-3d-back {
-    background: linear-gradient(135deg, rgba(74, 158, 255, 0.2), rgba(255, 107, 157, 0.15));
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(255, 107, 157, 0.15));
     transform: rotateY(180deg);
 }
 
@@ -701,7 +703,7 @@ body.light-mode .user-message .message-content {
 
 .showcase-label {
     padding: var(--sp-md);
-    background: rgba(74, 158, 255, 0.1);
+    background: rgba(139, 92, 246, 0.1);
     border-bottom: 1px solid var(--border-3d);
     font-weight: 600;
     text-align: center;
@@ -711,7 +713,7 @@ body.light-mode .user-message .message-content {
 .showcase-preview {
     width: 100%;
     height: 250px;
-    background: linear-gradient(135deg, rgba(74, 158, 255, 0.1), rgba(255, 107, 157, 0.05));
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(255, 107, 157, 0.05));
     position: relative;
     overflow: hidden;
 }
@@ -760,7 +762,7 @@ body.light-mode .user-message .message-content {
 
 .tech-item-3d:hover {
     border-color: var(--primary-3d);
-    box-shadow: 0 0 20px rgba(74, 158, 255, 0.2);
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.2);
     transform: translateY(-10px);
 }
 
@@ -847,7 +849,7 @@ body.light-mode .user-message .message-content {
 .avatar-3d-container {
     flex: 1;
     position: relative;
-    background: linear-gradient(135deg, rgba(74, 158, 255, 0.05), rgba(255, 107, 157, 0.05));
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(255, 107, 157, 0.05));
 }
 
 .avatar-3d-container canvas {
@@ -861,7 +863,7 @@ body.light-mode .user-message .message-content {
     height: 315px;
     margin: 0 var(--sp-sm) var(--sp-sm);
     overflow: hidden;
-    border: 1px solid rgba(74, 158, 255, 0.35);
+    border: 1px solid rgba(139, 92, 246, 0.35);
     border-radius: var(--rad-sm);
     background: rgba(10, 14, 39, 0.72);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
@@ -887,7 +889,7 @@ body.light-mode .user-message .message-content {
 .stat-3d {
     text-align: center;
     padding: var(--sp-md);
-    background: rgba(74, 158, 255, 0.1);
+    background: rgba(139, 92, 246, 0.1);
     border-radius: var(--rad-md);
 }
 
@@ -918,7 +920,7 @@ body.light-mode .user-message .message-content {
 .control-btn {
     flex: 1;
     padding: var(--sp-md);
-    background: rgba(74, 158, 255, 0.15);
+    background: rgba(139, 92, 246, 0.15);
     border: 1px solid var(--primary-3d);
     border-radius: var(--rad-md);
     color: var(--primary-3d);
@@ -988,7 +990,7 @@ body.light-mode .user-message .message-content {
 }
 
 .chat-messages-3d::-webkit-scrollbar-thumb {
-    background: rgba(74, 158, 255, 0.3);
+    background: rgba(139, 92, 246, 0.3);
     border-radius: 4px;
 }
 
@@ -1023,7 +1025,7 @@ body.light-mode .user-message .message-content {
 }
 
 .suggestion-btn {
-    background: rgba(74, 158, 255, 0.1);
+    background: rgba(139, 92, 246, 0.1);
     border: 1px solid var(--primary-3d);
     border-radius: var(--rad-md);
     padding: var(--sp-md);
@@ -1063,12 +1065,12 @@ body.light-mode .user-message .message-content {
 }
 
 .user-message .message-content {
-    background: linear-gradient(135deg, var(--primary-3d), #2a7def);
+    background: linear-gradient(135deg, var(--primary-3d), #a855f7);
     color: white;
 }
 
 .bot-message .message-content {
-    background: linear-gradient(135deg, rgba(74, 158, 255, 0.14), rgba(255, 107, 157, 0.08));
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.14), rgba(255, 107, 157, 0.08));
     color: var(--text-primary);
 }
 
@@ -1091,7 +1093,7 @@ body.light-mode .user-message .message-content {
 .input-control-btn {
     width: 40px;
     height: 40px;
-    background: rgba(74, 158, 255, 0.15);
+    background: rgba(139, 92, 246, 0.15);
     border: 1px solid var(--primary-3d);
     border-radius: var(--rad-md);
     color: var(--primary-3d);
@@ -1135,7 +1137,7 @@ body.light-mode .user-message .message-content {
     outline: none;
     background: rgba(255, 255, 255, 0.08);
     border-color: var(--primary-3d);
-    box-shadow: 0 0 15px rgba(74, 158, 255, 0.2);
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.2);
 }
 
 .chat-input-3d::placeholder {
@@ -1145,7 +1147,7 @@ body.light-mode .user-message .message-content {
 .send-btn-3d {
     width: 50px;
     height: 50px;
-    background: linear-gradient(135deg, var(--primary-3d), #2a7def);
+    background: linear-gradient(135deg, var(--primary-3d), #a855f7);
     border: none;
     border-radius: var(--rad-md);
     color: white;
@@ -1159,7 +1161,7 @@ body.light-mode .user-message .message-content {
 
 .send-btn-3d:hover {
     transform: scale(1.05);
-    box-shadow: 0 4px 15px rgba(74, 158, 255, 0.4);
+    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);
 }
 
 .input-meta-3d {
@@ -1287,7 +1289,7 @@ body.light-mode .user-message .message-content {
 
 .setting-group select {
     width: 100%;
-    background: rgba(74, 158, 255, 0.1);
+    background: rgba(139, 92, 246, 0.1);
     border: 1px solid var(--primary-3d);
     border-radius: var(--rad-md);
     padding: var(--sp-sm);
@@ -1386,7 +1388,7 @@ body.light-mode .user-message .message-content {
 .loading-spinner {
     width: 60px;
     height: 60px;
-    border: 4px solid rgba(74, 158, 255, 0.2);
+    border: 4px solid rgba(139, 92, 246, 0.2);
     border-top: 4px solid var(--primary-3d);
     border-radius: 50%;
     animation: spin-3d 1s linear infinite;
@@ -1414,7 +1416,7 @@ body.light-mode .user-message .message-content {
     text-align: center;
     padding: var(--sp-xxl) var(--sp-lg);
     margin-bottom: var(--sp-xxl);
-    background: linear-gradient(135deg, rgba(74, 158, 255, 0.1), rgba(255, 107, 157, 0.1));
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(255, 107, 157, 0.1));
     border-radius: var(--rad-xl);
     border: 1px solid var(--border-3d);
 }
@@ -1481,7 +1483,7 @@ body.light-mode .user-message .message-content {
 
 .feature-detailed:hover {
     border-color: var(--primary-3d);
-    box-shadow: 0 0 20px rgba(74, 158, 255, 0.2);
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.2);
     transform: translateY(-10px);
 }
 
@@ -1558,7 +1560,7 @@ body.light-mode .user-message .message-content {
 }
 
 .arch-layer {
-    background: linear-gradient(135deg, rgba(74, 158, 255, 0.15), rgba(255, 107, 157, 0.1));
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(255, 107, 157, 0.1));
     border: 1px solid var(--border-3d);
     border-radius: var(--rad-md);
     padding: var(--sp-lg);
@@ -1682,7 +1684,7 @@ body.light-mode .user-message .message-content {
 .about-cta-3d {
     text-align: center;
     padding: var(--sp-xxl);
-    background: linear-gradient(135deg, rgba(74, 158, 255, 0.1), rgba(255, 107, 157, 0.05));
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(255, 107, 157, 0.05));
     border-radius: var(--rad-xl);
     border: 1px solid var(--border-3d);
     margin-top: var(--sp-xxl);

@@ -56,36 +56,172 @@ function getSessionId() {
  * Initialize Gradient Canvas Background
  */
 function initGradientCanvas() {
-    const canvas = document.getElementById('gradient-canvas');
-    if (!canvas) return;
-    
+    let canvas = document.getElementById('gradient-canvas');
+    if (!canvas) {
+        const backgroundContainer = document.createElement('div');
+        backgroundContainer.className = 'background-container generated-background';
+
+        const starfield = document.createElement('div');
+        starfield.className = 'starfield';
+
+        canvas = document.createElement('canvas');
+        canvas.id = 'gradient-canvas';
+
+        backgroundContainer.appendChild(starfield);
+        backgroundContainer.appendChild(canvas);
+        document.body.prepend(backgroundContainer);
+    }
+
     const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    
-    // Draw animated gradient
-    const drawGradient = () => {
-        const time = Date.now() * 0.0001;
-        
-        const gradient = ctx.createLinearGradient(
-            Math.sin(time) * window.innerWidth,
-            Math.cos(time) * window.innerHeight,
-            Math.cos(time) * window.innerWidth,
-            Math.sin(time) * window.innerHeight
-        );
-        
-        gradient.addColorStop(0, 'rgba(74, 158, 255, 0.1)');
-        gradient.addColorStop(0.5, 'rgba(255, 107, 157, 0.05)');
-        gradient.addColorStop(1, 'rgba(0, 255, 136, 0.05)');
-        
-        ctx.fillStyle = gradient;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        requestAnimationFrame(drawGradient);
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let width = 0;
+    let height = 0;
+    let stars = [];
+    let rockets = [];
+
+    const resizeCanvas = () => {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = width * window.devicePixelRatio;
+        canvas.height = height * window.devicePixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
+
+        const starCount = Math.min(240, Math.floor((width * height) / 5200));
+        stars = Array.from({ length: starCount }, () => ({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            size: 0.4 + Math.random() * 1.8,
+            alpha: 0.22 + Math.random() * 0.72,
+            twinkle: 0.35 + Math.random() * 1.8,
+        }));
+
+        const rocketCount = width < 720 ? 4 : 8;
+        rockets = Array.from({ length: rocketCount }, (_, index) => ({
+            x: Math.random() * width,
+            y: Math.random() * height,
+            speed: 0.22 + Math.random() * 0.34,
+            size: 0.42 + Math.random() * 0.34,
+            offset: index * 0.7,
+        }));
     };
-    
-    drawGradient();
+
+    const drawMilkyWay = (time) => {
+        ctx.save();
+        ctx.translate(width * 0.52, height * 0.48);
+        ctx.rotate(-0.42);
+
+        const galaxy = ctx.createLinearGradient(-width * 0.65, 0, width * 0.65, 0);
+        galaxy.addColorStop(0, 'rgba(74, 158, 255, 0)');
+        galaxy.addColorStop(0.22, 'rgba(74, 158, 255, 0.1)');
+        galaxy.addColorStop(0.48, 'rgba(255, 255, 255, 0.18)');
+        galaxy.addColorStop(0.66, 'rgba(255, 107, 157, 0.11)');
+        galaxy.addColorStop(1, 'rgba(0, 255, 136, 0)');
+
+        ctx.globalAlpha = 0.82;
+        ctx.fillStyle = galaxy;
+        ctx.filter = 'blur(18px)';
+        ctx.fillRect(-width, -height * 0.16, width * 2, height * 0.32);
+
+        ctx.globalAlpha = 0.38 + Math.sin(time * 0.00025) * 0.08;
+        ctx.filter = 'blur(42px)';
+        ctx.fillRect(-width * 0.75, -height * 0.06, width * 1.5, height * 0.12);
+        ctx.restore();
+        ctx.filter = 'none';
+    };
+
+    const drawRocket = (rocket, time) => {
+        const drift = reduceMotion ? 0 : time * rocket.speed * 0.035;
+        const x = (rocket.x + drift) % (width + 90) - 45;
+        const y = (rocket.y - drift * 0.38 + Math.sin(time * 0.001 + rocket.offset) * 10 + height + 60) % (height + 120) - 60;
+        const scale = rocket.size;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(-0.82);
+        ctx.scale(scale, scale);
+
+        ctx.fillStyle = 'rgba(0, 255, 136, 0.58)';
+        ctx.beginPath();
+        ctx.moveTo(-18, 0);
+        ctx.lineTo(-32, -5);
+        ctx.lineTo(-32, 5);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#ff6b9d';
+        ctx.beginPath();
+        ctx.moveTo(18, 0);
+        ctx.lineTo(7, -7);
+        ctx.lineTo(7, 7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#4a9eff';
+        ctx.beginPath();
+        ctx.moveTo(-8, -6);
+        ctx.lineTo(4, -6);
+        ctx.quadraticCurveTo(10, -6, 10, 0);
+        ctx.quadraticCurveTo(10, 6, 4, 6);
+        ctx.lineTo(-8, 6);
+        ctx.quadraticCurveTo(-14, 6, -14, 0);
+        ctx.quadraticCurveTo(-14, -6, -8, -6);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.beginPath();
+        ctx.arc(1, 0, 3, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ff6b9d';
+        ctx.beginPath();
+        ctx.moveTo(-10, -6);
+        ctx.lineTo(-18, -13);
+        ctx.lineTo(-15, -4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(-10, 6);
+        ctx.lineTo(-18, 13);
+        ctx.lineTo(-15, 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    };
+
+    const drawSpaceBackground = (time) => {
+        ctx.clearRect(0, 0, width, height);
+
+        const base = ctx.createRadialGradient(width * 0.5, height * 0.45, 0, width * 0.5, height * 0.45, Math.max(width, height));
+        base.addColorStop(0, 'rgba(10, 14, 39, 0.82)');
+        base.addColorStop(0.48, 'rgba(4, 6, 20, 0.96)');
+        base.addColorStop(1, 'rgba(0, 0, 0, 1)');
+        ctx.fillStyle = base;
+        ctx.fillRect(0, 0, width, height);
+
+        drawMilkyWay(time);
+
+        stars.forEach((star) => {
+            const twinkle = reduceMotion ? 1 : 0.65 + Math.sin(time * 0.001 * star.twinkle + star.x) * 0.35;
+            ctx.globalAlpha = star.alpha * twinkle;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        rockets.forEach((rocket) => drawRocket(rocket, time));
+
+        requestAnimationFrame(drawSpaceBackground);
+    };
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    requestAnimationFrame(drawSpaceBackground);
 }
 /**
  * Fetch API Data
@@ -306,7 +442,7 @@ function createParticleShaderMaterial() {
             vec3 pos = position + velocity * uTime;
             
             gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-            gl_PointSize = size * (1.0 - life) * 10.0;
+            gl_PointSize = size * (1.0 - life) * 14.0;
         }
     `;
     
@@ -315,14 +451,26 @@ function createParticleShaderMaterial() {
         varying vec3 vColor;
         
         void main() {
-            // Circle shape
-            vec2 circCoord = 2.0 * gl_PointCoord - 1.0;
-            float dist = dot(circCoord, circCoord);
-            
-            if (dist > 1.0) discard;
-            
-            float alpha = (1.0 - dist) * vLife;
-            gl_FragColor = vec4(vColor, alpha);
+            vec2 coord = gl_PointCoord - 0.5;
+            float radius = length(coord);
+
+            if (radius > 0.5) discard;
+
+            float core = 1.0 - smoothstep(0.0, 0.22, radius);
+            float horizontalRay = (1.0 - smoothstep(0.015, 0.11, abs(coord.y))) * (1.0 - smoothstep(0.05, 0.5, abs(coord.x)));
+            float verticalRay = (1.0 - smoothstep(0.015, 0.11, abs(coord.x))) * (1.0 - smoothstep(0.05, 0.5, abs(coord.y)));
+            float diagonalRayA = (1.0 - smoothstep(0.0, 0.075, abs(coord.x - coord.y))) * (1.0 - smoothstep(0.05, 0.5, radius));
+            float diagonalRayB = (1.0 - smoothstep(0.0, 0.075, abs(coord.x + coord.y))) * (1.0 - smoothstep(0.05, 0.5, radius));
+            float halo = (1.0 - smoothstep(0.0, 0.5, radius)) * 0.32;
+
+            float star = max(core, max(horizontalRay, verticalRay) * 0.85);
+            star = max(star, max(diagonalRayA, diagonalRayB) * 0.36);
+            star += halo;
+
+            float sparkle = 0.72 + 0.28 * sin((gl_FragCoord.x + gl_FragCoord.y) * 0.08);
+            float alpha = clamp(star * vLife * sparkle, 0.0, 1.0);
+            vec3 glowColor = mix(vec3(1.0), vColor, 0.58);
+            gl_FragColor = vec4(glowColor, alpha);
         }
     `;
     
@@ -333,6 +481,7 @@ function createParticleShaderMaterial() {
         vertexShader,
         fragmentShader,
         transparent: true,
+        blending: THREE.AdditiveBlending,
         depthWrite: false,
     });
 }
@@ -364,11 +513,11 @@ function init3DScene(containerId) {
     }
     
     const isLightTheme = document.body.classList.contains('light-mode');
-    const sceneBackground = isLightTheme ? 0xf7fbff : 0x0a0e27;
+    const sceneBackground = isLightTheme ? 0xf7fbff : 0x000000;
 
     // Scene setup
     CONFIG_3D.scene = new THREE.Scene();
-    CONFIG_3D.scene.background = new THREE.Color(sceneBackground);
+    CONFIG_3D.scene.background = isLightTheme ? new THREE.Color(sceneBackground) : null;
     CONFIG_3D.scene.fog = new THREE.Fog(sceneBackground, 100, 1000);
     
     // Camera setup
@@ -613,49 +762,106 @@ function createParticleSystem() {
  */
 function createAvatar() {
     const group = new THREE.Group();
-    
-    // Head
-    const headGeometry = new THREE.IcosahedronGeometry(0.5, 4);
-    const headMaterial = new THREE.MeshStandardMaterial({
+
+    const bodyMaterial = new THREE.MeshStandardMaterial({
         color: 0x4a9eff,
-        metalness: 0.3,
-        roughness: 0.4,
+        metalness: 0.45,
+        roughness: 0.32,
         emissive: 0x1a4d99,
-        emissiveIntensity: 0.15,
+        emissiveIntensity: 0.08,
     });
-    const head = new THREE.Mesh(headGeometry, headMaterial);
-    head.position.y = 1;
-    group.add(head);
-    
-    // Eyes
-    const eyeGeometry = new THREE.SphereGeometry(0.1, 16, 16);
-    const eyeMaterial = new THREE.MeshStandardMaterial({
+    const noseMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff6b9d,
+        metalness: 0.25,
+        roughness: 0.38,
+    });
+    const glassMaterial = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         emissive: 0x00ff88,
-        emissiveIntensity: 0.8,
+        emissiveIntensity: 0.85,
+        metalness: 0.1,
+        roughness: 0.18,
     });
-    
-    const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-    leftEye.position.set(-0.15, 1.15, 0.4);
-    group.add(leftEye);
-    
-    const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
-    rightEye.position.set(0.15, 1.15, 0.4);
-    group.add(rightEye);
-    
-    // Body
-    const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.4, 1, 32);
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2a5a9f,
-        metalness: 0.3,
-        roughness: 0.5,
+    const flameMaterial = new THREE.MeshStandardMaterial({
+        color: 0x00ff88,
+        emissive: 0x00ff88,
+        emissiveIntensity: 1.2,
+        transparent: true,
+        opacity: 0.85,
     });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.position.y = -0.2;
-    group.add(body);
+
+    const fuselage = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.34, 0.42, 1.45, 40),
+        bodyMaterial
+    );
+    fuselage.position.y = 0.1;
+    group.add(fuselage);
+
+    const noseCone = new THREE.Mesh(
+        new THREE.ConeGeometry(0.34, 0.62, 40),
+        noseMaterial
+    );
+    noseCone.position.y = 1.14;
+    group.add(noseCone);
+
+    const window = new THREE.Mesh(
+        new THREE.SphereGeometry(0.15, 24, 24),
+        glassMaterial
+    );
+    window.scale.set(1, 1, 0.32);
+    window.position.set(0, 0.45, 0.37);
+    group.add(window);
+
+    const engine = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.28, 0.36, 0.18, 32),
+        new THREE.MeshStandardMaterial({
+            color: 0x2a5a9f,
+            metalness: 0.5,
+            roughness: 0.35,
+        })
+    );
+    engine.position.y = -0.72;
+    group.add(engine);
+
+    const finGeometry = new THREE.ConeGeometry(0.22, 0.58, 3);
+    const finMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff6b9d,
+        metalness: 0.2,
+        roughness: 0.42,
+    });
+
+    const leftFin = new THREE.Mesh(finGeometry, finMaterial);
+    leftFin.position.set(-0.4, -0.48, 0);
+    leftFin.rotation.z = Math.PI;
+    leftFin.rotation.y = Math.PI / 2;
+    leftFin.scale.set(0.8, 1, 0.7);
+    group.add(leftFin);
+
+    const rightFin = leftFin.clone();
+    rightFin.position.x = 0.4;
+    rightFin.rotation.y = -Math.PI / 2;
+    group.add(rightFin);
+
+    const rearFin = new THREE.Mesh(finGeometry, finMaterial);
+    rearFin.position.set(0, -0.48, -0.36);
+    rearFin.rotation.z = Math.PI;
+    rearFin.scale.set(0.75, 1, 0.7);
+    group.add(rearFin);
+
+    const flame = new THREE.Mesh(
+        new THREE.ConeGeometry(0.24, 0.55, 24),
+        flameMaterial
+    );
+    flame.name = 'rocket-flame';
+    flame.position.y = -1.08;
+    flame.rotation.x = Math.PI;
+    group.add(flame);
+
+    group.scale.set(1.05, 1.05, 1.05);
     
     CONFIG_3D.avatar = group;
     CONFIG_3D.scene.add(group);
+    setAvatarStatus('Rocket ready');
 }
 
 // ============================================================================
@@ -697,6 +903,11 @@ function animate() {
     if (CONFIG_3D.avatar) {
         CONFIG_3D.avatar.position.y = 0.05 * Math.sin(elapsed * 0.5);
         CONFIG_3D.avatar.rotation.y += deltaTime * 0.5;
+        const flame = CONFIG_3D.avatar.getObjectByName('rocket-flame');
+        if (flame) {
+            const flamePulse = 0.85 + 0.2 * Math.sin(elapsed * 12);
+            flame.scale.set(flamePulse, 1 + 0.18 * Math.sin(elapsed * 14), flamePulse);
+        }
     }
     
     // Update camera
@@ -814,8 +1025,8 @@ function setupThemeToggle() {
         themeToggle.setAttribute('aria-label', isLight ? 'Switch to dark mode' : 'Switch to light mode');
 
         if (CONFIG_3D.scene) {
-            const backgroundColor = isLight ? 0xf7fbff : 0x0a0e27;
-            CONFIG_3D.scene.background = new THREE.Color(backgroundColor);
+            const backgroundColor = isLight ? 0xf7fbff : 0x000000;
+            CONFIG_3D.scene.background = isLight ? new THREE.Color(backgroundColor) : null;
             CONFIG_3D.scene.fog = new THREE.Fog(backgroundColor, 100, 1000);
         }
     };
