@@ -791,6 +791,39 @@ body.light-mode .user-message .message-content {
 }
 
 /* ============================================================================
+   ABOUT SECTION
+   ============================================================================ */
+
+.landing-about-section-3d {
+    max-width: 1000px;
+    margin: var(--sp-xxl) auto;
+    padding: var(--sp-xxl);
+    text-align: center;
+    background: var(--card-bg-3d);
+    border: 1px solid var(--border-3d);
+    border-radius: var(--rad-xl);
+    position: relative;
+    z-index: 10;
+}
+
+.landing-about-section-3d h2 {
+    font-size: 2.5rem;
+    margin-bottom: var(--sp-md);
+    background: linear-gradient(135deg, var(--primary-3d), var(--secondary-3d));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.landing-about-section-3d p {
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+    line-height: 1.8;
+    margin: 0 auto;
+    max-width: 760px;
+}
+
+/* ============================================================================
    CTA SECTION
    ============================================================================ */
 
