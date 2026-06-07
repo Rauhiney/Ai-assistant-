@@ -2132,3 +2132,73 @@ body.light-mode .user-message .message-content {
 .cursor-pointer {
     cursor: pointer;
 }
+
+/* ============================================================================
+   OLLAMA STATUS INDICATOR
+   ============================================================================ */
+
+.ollama-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    transition: all var(--trans-normal);
+    background: rgba(139, 92, 246, 0.1);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    color: rgba(139, 92, 246, 0.8);
+}
+
+.ollama-indicator .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #8b5cf6;
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.ollama-indicator.ready {
+    background: rgba(0, 255, 136, 0.1);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    color: rgba(0, 255, 136, 0.9);
+}
+
+.ollama-indicator.ready .dot {
+    background: #00ff88;
+    animation: pulse-dot-ready 1s ease-in-out infinite;
+}
+
+.ollama-indicator.loading {
+    background: rgba(255, 107, 157, 0.1);
+    border: 1px solid rgba(255, 107, 157, 0.3);
+    color: rgba(255, 107, 157, 0.8);
+}
+
+.ollama-indicator.loading .dot {
+    background: #ff6b9d;
+}
+
+@keyframes pulse-dot {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(1.2);
+    }
+}
+
+@keyframes pulse-dot-ready {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+}

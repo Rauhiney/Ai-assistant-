@@ -53,6 +53,69 @@ function getSessionId() {
 }
 
 /**
+ * Check if Ollama AI is ready
+ */
+let OLLAMA_STATUS = {
+    ready: false,
+    checking: true,
+    lastCheck: 0,
+};
+
+async function checkOllamaReady() {
+    try {
+        const response = await fetch('/api/ollama/ready', { timeout: 3000 });
+        OLLAMA_STATUS.ready = response.status === 200;
+        OLLAMA_STATUS.checking = false;
+        OLLAMA_STATUS.lastCheck = Date.now();
+        
+        if (OLLAMA_STATUS.ready) {
+            console.log('✅ Ollama is ready!');
+            updateOllamaIndicator(true);
+        } else {
+            console.log('⏳ Ollama is starting up...');
+            updateOllamaIndicator(false);
+        }
+    } catch (error) {
+        console.log('⏳ Checking Ollama...', error.message);
+        OLLAMA_STATUS.ready = false;
+        OLLAMA_STATUS.checking = false;
+        updateOllamaIndicator(false);
+    }
+}
+
+function updateOllamaIndicator(isReady) {
+    const indicator = document.getElementById('ollama-status-indicator');
+    if (!indicator) return;
+    
+    if (isReady) {
+        indicator.className = 'ollama-indicator ready';
+        indicator.title = 'Ollama AI is ready';
+        indicator.innerHTML = '<span class="dot"></span> Ready';
+    } else {
+        indicator.className = 'ollama-indicator loading';
+        indicator.title = 'Ollama AI is warming up...';
+        indicator.innerHTML = '<span class="dot"></span> Warming up';
+    }
+}
+
+// Start checking Ollama status on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        checkOllamaReady();
+        // Re-check every 5 seconds if not ready
+        const checkInterval = setInterval(() => {
+            if (!OLLAMA_STATUS.ready) {
+                checkOllamaReady();
+            } else {
+                clearInterval(checkInterval);
+            }
+        }, 5000);
+    });
+} else {
+    checkOllamaReady();
+}
+
+/**
  * Initialize Gradient Canvas Background
  */
 function initGradientCanvas() {

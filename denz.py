@@ -58,7 +58,7 @@ ASSISTANT_NAME = "DENZ"
 ASSISTANT_VERSION = "3D-ULTRA-AI-FASTEST"
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:latest")
-OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "4"))
+OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "15"))  # Increased from 4s to 15s for better responses
 
 # Weather API
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "").strip()
@@ -1127,7 +1127,7 @@ def get_instant_response(user_message):
 
 
 def get_ollama_response_ultra_fast(user_message, location_data, weather_data, local_time, chat_history=None, session_id=None):
-    """Ollama response with adaptive complexity handling"""
+    """Ollama response with adaptive complexity handling and better error recovery"""
     chat_history = chat_history or []
 
     # Check response cache
@@ -1153,7 +1153,12 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
         num_predict = 300 if is_complex else 96
         max_response_length = 1500 if is_complex else 500
         
-        logger.info(f"📤 Ollama request (complexity: {'HIGH' if is_complex else 'LOW'})")
+        # Adaptive timeout: longer for complex questions
+        timeout = min(OLLAMA_TIMEOUT * 2, 30) if is_complex else OLLAMA_TIMEOUT
+        
+        logger.info(f"📤 Ollama request (complexity: {'HIGH' if is_complex else 'LOW'}, timeout: {timeout}s)")
+        logger.info(f"   Model: {OLLAMA_MODEL}")
+        logger.info(f"   Question: {user_message[:60]}")
         
         response = requests.post(
             f"{OLLAMA_URL}/api/generate",
@@ -1168,7 +1173,7 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
                     "num_ctx": 2048 if is_complex else 1024,
                 },
             },
-            timeout=OLLAMA_TIMEOUT
+            timeout=timeout
         )
         response.raise_for_status()
         
@@ -1182,19 +1187,39 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
             # Cache response
             response_cache[message_key] = ai_response
             
-            logger.info(f"✅ Response: {ai_response[:40]}")
+            logger.info(f"✅ Response: {ai_response[:60]}")
             return ai_response
         
-        logger.warning("⚠️ Ollama failed, using fallback")
-        if has_real_location(location_data):
-            return f"Nice weather in {location_data['city']}! {weather_data['description']}, {weather_data['temperature']}C."
-        return "Hello! How can I help?"
+        logger.warning("⚠️ Ollama returned empty response")
+        return generate_smart_fallback(user_message, location_data, weather_data, local_time)
     
+    except requests.exceptions.Timeout:
+        logger.error(f"⏱️ Ollama timeout ({timeout}s) - check if Ollama server is running")
+        return generate_smart_fallback(user_message, location_data, weather_data, local_time)
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"🔌 Ollama connection error: {e} - ensure Ollama is running at {OLLAMA_URL}")
+        return generate_smart_fallback(user_message, location_data, weather_data, local_time)
     except Exception as e:
         logger.error(f"❌ Ollama error: {e}")
-        if has_real_location(location_data):
-            return f"Hello! It's {local_time['time']} in {location_data['city']}."
-        return "Hello! How can I help?"
+        return generate_smart_fallback(user_message, location_data, weather_data, local_time)
+
+
+def generate_smart_fallback(user_message, location_data, weather_data, local_time):
+    """Generate a smart fallback response when Ollama fails."""
+    msg = user_message.lower()
+    
+    # Try to give a contextual response based on the question type
+    if any(word in msg for word in ['where', 'location', 'city', 'state', 'country', 'lies']):
+        return f"I'm having trouble connecting to my knowledge base right now. Your question about location/place is interesting - try rephrasing it or ask me again in a moment."
+    
+    if any(word in msg for word in ['what', 'who', 'define', 'mean', 'meaning']):
+        return f"I'm temporarily unable to access my knowledge base. Try asking again or rephrase your question. I'll do my best to help!"
+    
+    if any(word in msg for word in ['how', 'why', 'explain', 'describe']):
+        return "I'm experiencing technical difficulties with my AI engine. Please try your question again in a moment, and I'll provide a detailed answer."
+    
+    # Generic fallback with acknowledgment
+    return "I'm currently having trouble processing that. Could you try rephrasing your question? I'm here to help!"
 
 
 # ============================================================================
@@ -1692,27 +1717,63 @@ def get_assistant_info():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
+    """Comprehensive health check including Ollama status"""
     try:
-        ollama = {'connected': False, 'url': OLLAMA_URL, 'model': OLLAMA_MODEL}
+        ollama = {
+            'connected': False,
+            'url': OLLAMA_URL,
+            'model': OLLAMA_MODEL,
+            'ready': False,
+            'models': []
+        }
         try:
             ollama_response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
             ollama['connected'] = ollama_response.status_code == 200
+            
             if ollama['connected']:
-                models = [model.get('name') for model in ollama_response.json().get('models', [])]
-                ollama['model_available'] = OLLAMA_MODEL in models
+                models = ollama_response.json().get('models', [])
+                ollama['models'] = [model.get('name') for model in models]
+                ollama['model_available'] = OLLAMA_MODEL in ollama['models']
+                ollama['ready'] = ollama['model_available']
         except Exception as ollama_error:
             ollama['error'] = str(ollama_error)
 
         return jsonify({
-            'status': 'healthy',
+            'status': 'healthy' if ollama['connected'] else 'degraded',
             'service': ASSISTANT_NAME,
             'version': ASSISTANT_VERSION,
             'ollama': ollama,
             'timestamp': datetime.now().isoformat(),
             'success': True
-        }), 200
+        }), 200 if ollama['connected'] else 503
     except Exception as e:
         return jsonify({'status': 'unhealthy', 'success': False}), 500
+
+
+@app.route('/api/ollama/ready', methods=['GET'])
+def ollama_ready():
+    """Quick check if Ollama is ready to answer questions"""
+    try:
+        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
+        is_ready = response.status_code == 200
+        
+        if is_ready:
+            models = [model.get('name') for model in response.json().get('models', [])]
+            is_ready = OLLAMA_MODEL in models
+        
+        return jsonify({
+            'ready': is_ready,
+            'url': OLLAMA_URL,
+            'model': OLLAMA_MODEL,
+            'success': True
+        }), 200 if is_ready else 503
+    except Exception as e:
+        return jsonify({
+            'ready': False,
+            'error': str(e),
+            'url': OLLAMA_URL,
+            'success': False
+        }), 503
 
 
 # ============================================================================
@@ -1730,6 +1791,91 @@ def server_error(error):
 
 
 initialize_database()
+
+
+# ============================================================================
+# OLLAMA INITIALIZATION & WARMUP
+# ============================================================================
+
+def warmup_ollama():
+    """Warm up Ollama on startup by loading the model and making a test request."""
+    logger.info("🔥 Warming up Ollama...")
+    
+    max_attempts = 10
+    attempt = 0
+    
+    while attempt < max_attempts:
+        attempt += 1
+        try:
+            logger.info(f"   Attempt {attempt}/{max_attempts}: Checking Ollama at {OLLAMA_URL}")
+            
+            # First, check if Ollama is accessible
+            tags_response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+            tags_response.raise_for_status()
+            
+            models = [model.get('name') for model in tags_response.json().get('models', [])]
+            logger.info(f"   ✅ Ollama is running. Available models: {models[:3]}")
+            
+            if OLLAMA_MODEL not in models:
+                logger.warning(f"   ⚠️ Model '{OLLAMA_MODEL}' not in available models. Pulling it...")
+                # Try to pull the model
+                try:
+                    pull_response = requests.post(
+                        f"{OLLAMA_URL}/api/pull",
+                        json={"name": OLLAMA_MODEL},
+                        timeout=120
+                    )
+                    if pull_response.status_code == 200:
+                        logger.info(f"   ✅ Model '{OLLAMA_MODEL}' pulled successfully")
+                except Exception as pull_error:
+                    logger.error(f"   ❌ Could not pull model: {pull_error}")
+                    return False
+            
+            # Make a warmup request to load the model into memory
+            logger.info(f"   🚀 Making warmup request to load model into memory...")
+            warmup_prompt = "Hello, respond with 'Ready' only."
+            
+            warmup_response = requests.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": warmup_prompt,
+                    "stream": False,
+                    "keep_alive": "10m",
+                    "options": {
+                        "temperature": 0.1,
+                        "num_predict": 10,
+                    },
+                },
+                timeout=60
+            )
+            warmup_response.raise_for_status()
+            
+            logger.info(f"   ✅ Ollama is ready! Model loaded and warmed up.")
+            return True
+        
+        except requests.exceptions.Timeout:
+            logger.warning(f"   ⏱️ Timeout waiting for Ollama (attempt {attempt}/{max_attempts})")
+            if attempt < max_attempts:
+                import time
+                time.sleep(2)
+            continue
+        except requests.exceptions.ConnectionError:
+            logger.warning(f"   🔌 Ollama not responding (attempt {attempt}/{max_attempts})")
+            if attempt < max_attempts:
+                import time
+                time.sleep(2)
+            continue
+        except Exception as e:
+            logger.warning(f"   ⚠️ Warmup error: {e} (attempt {attempt}/{max_attempts})")
+            if attempt < max_attempts:
+                import time
+                time.sleep(2)
+            continue
+    
+    logger.error(f"❌ Could not connect to Ollama after {max_attempts} attempts")
+    logger.error(f"   Make sure Ollama is running at {OLLAMA_URL}")
+    return False
 
 
 # ============================================================================
@@ -1755,6 +1901,14 @@ if __name__ == '__main__':
             logger.info("✅ Database ready")
         except Exception as e:
             logger.error(f"❌ DB error: {e}")
+    
+    # Warm up Ollama before starting the server
+    ollama_ready = warmup_ollama()
+    
+    if ollama_ready:
+        logger.info("✅ Ollama is ready for requests!")
+    else:
+        logger.warning("⚠️ Ollama warmup failed, but server starting anyway. Requests may fail initially.")
     
     logger.info(f"🌐 Flask on http://localhost:5000")
     logger.info("="*70 + "\n")
