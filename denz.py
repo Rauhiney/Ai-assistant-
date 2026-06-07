@@ -56,8 +56,21 @@ load_local_env()
 
 ASSISTANT_NAME = "DENZ"
 ASSISTANT_VERSION = "3D-ULTRA-AI-FASTEST"
+SYSTEM_PROMPT = """
+You are DENZ, an advanced AI assistant created by Rauhiney Kashyap.
+
+You provide accurate, detailed and helpful answers.
+
+Think step by step.
+
+If the question is technical, explain clearly.
+
+If the user asks for code, provide complete code.
+
+Maintain a friendly and intelligent personality.
+"""
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:latest")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")  # Upgraded to llama3.1:8b for better responses
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "15"))  # Increased from 4s to 15s for better responses
 
 # Weather API
@@ -78,7 +91,19 @@ response_cache = {}
 pending_weather_requests = {}
 conversation_memory = {}
 
-WEATHER_KEYWORDS = ('weather', 'temperature', 'forecast', 'rain', 'cloud', 'humidity', 'wind')
+WEATHER_KEYWORDS = [
+    "weather",
+    "temperature",
+    "forecast",
+    "rain",
+    "humidity",
+    "climate",
+]
+CAPITAL_KEYWORDS = [
+    "capital of",
+    "state capital",
+    "capital city",
+]
 NON_LOCATION_WORDS = {
     'what', 'whats', 'what is', 'current', 'the current', 'today', 'now',
     'right now', 'currently', 'please', 'pls', 'weather', 'temperature',
@@ -87,7 +112,7 @@ NON_LOCATION_WORDS = {
 WEATHER_FILLER_WORDS = (
     'what', 'whats', 'is', 'the', 'current', 'today', 'now', 'right', 'currently',
     'please', 'pls', 'tell', 'me', 'show', 'check', 'weather', 'temperature',
-    'forecast', 'rain', 'cloud', 'humidity', 'wind', 'in', 'at', 'for', 'of',
+    'forecast', 'rain', 'humidity', 'climate', 'in', 'at', 'for', 'of',
     's', 'hat', 'todays',
 )
 LOCATION_ALIASES = {
@@ -138,8 +163,10 @@ def get_session_context(session_id):
 
 def infer_user_intent(message):
     text = normalize_conversation_text(normalize_weather_terms(message))
-    if any(keyword in text for keyword in ('weather', 'temperature', 'forecast', 'humidity', 'wind', 'rain', 'cloud')):
+    if any(keyword in text for keyword in WEATHER_KEYWORDS):
         return 'weather'
+    if is_capital_query(message):
+        return 'capital'
     if any(keyword in text for keyword in ('news', 'headline', 'breaking', 'latest update', 'latest')):
         return 'news'
     if any(keyword in text for keyword in ('what', 'why', 'how', 'who', 'which', 'where', 'when', 'tell me', 'explain', 'define')):
@@ -169,7 +196,7 @@ def normalize_entity_from_text(message):
         cleaned,
         flags=re.IGNORECASE,
     )
-    tokens = [token for token in cleaned.split() if token and token not in {'weather', 'temperature', 'forecast', 'rain', 'humidity', 'wind'}]
+    tokens = [token for token in cleaned.split() if token and token not in WEATHER_KEYWORDS]
     if not tokens:
         return None
     if len(tokens) <= 3:
@@ -183,7 +210,7 @@ def is_short_followup(message, context):
         return False
     if text in {'next', 'more', 'again', 'same', 'what about it', 'what about', 'that', 'this', 'it', 'also', 'and'}:
         return True
-    if len(text.split()) <= 3 and not any(word in text for word in ('weather', 'temperature', 'forecast', 'news', 'what', 'why', 'how', 'who', 'where', 'when', 'which', 'is', 'are', 'can', 'could', 'should', 'do', 'does')):
+    if len(text.split()) <= 3 and not any(word in text for word in WEATHER_KEYWORDS + ['news', 'what', 'why', 'how', 'who', 'where', 'when', 'which', 'is', 'are', 'can', 'could', 'should', 'do', 'does']):
         return True
     return False
 
@@ -673,8 +700,19 @@ def get_weather_data(latitude, longitude, location_name="Unknown"):
 
 
 def is_weather_question(message):
-    msg = normalize_weather_terms(message).lower()
-    return any(keyword in msg for keyword in WEATHER_KEYWORDS)
+    user_message = normalize_weather_terms(message).lower()
+    return any(
+        word in user_message
+        for word in WEATHER_KEYWORDS
+    )
+
+
+def is_capital_query(message):
+    user_message = message.lower()
+    return any(
+        word in user_message
+        for word in CAPITAL_KEYWORDS
+    )
 
 
 def is_valid_weather_location(location):
@@ -705,11 +743,12 @@ def is_valid_weather_location(location):
 def extract_weather_location(message):
     """Extract simple locations from weather questions like 'weather of Dharamshala'."""
     normalized_message = normalize_weather_terms(message)
+    weather_terms = '|'.join(re.escape(keyword) for keyword in WEATHER_KEYWORDS)
     patterns = [
-        r'\b(?:weather|temperature|forecast|rain|humidity|wind)\s+(?:in|at|for|of)\s+([a-zA-Z\s,-]+)',
-        r'\b(?:in|at|for|of)\s+([a-zA-Z\s,-]+)\s+(?:weather|temperature|forecast|rain|humidity|wind)\b',
-        r'^([a-zA-Z\s,-]+)\s+(?:weather|temperature|forecast|rain|humidity|wind)\b',
-        r'\b(?:weather|temperature|forecast|rain|humidity|wind)\s+([a-zA-Z\s,-]+)$',
+        rf'\b(?:{weather_terms})\s+(?:in|at|for|of)\s+([a-zA-Z\s,-]+)',
+        rf'\b(?:in|at|for|of)\s+([a-zA-Z\s,-]+)\s+(?:{weather_terms})\b',
+        rf'^([a-zA-Z\s,-]+)\s+(?:{weather_terms})\b',
+        rf'\b(?:{weather_terms})\s+([a-zA-Z\s,-]+)$',
     ]
 
     for pattern in patterns:
@@ -927,33 +966,24 @@ INCOMPLETE_QUESTION_REPLY = (
 
 
 def is_incomplete_question(message):
-    """Detect very short question fragments that are truly incomplete (e.g., just 'what' or 'tell me')."""
+    """Detect ONLY truly incomplete question fragments - be very strict."""
     normalized = re.sub(r'\s+', ' ', message.lower()).strip(" .?!")
     if not normalized:
         return False
 
-    # Only these exact single/double words are truly incomplete
-    truly_incomplete = {
-        'what', 'who', 'where', 'why', 'how', 'tell me', 'explain',
-        'define', 'what is', 'who is', 'where is',
-    }
+    # Single words that alone are incomplete
+    single_word_incomplete = {'what', 'who', 'where', 'why', 'how', 'tell', 'explain', 'define'}
     
-    # If it's a complete sentence/phrase, it's not incomplete
-    word_count = len(normalized.split())
-    
-    # Single word or very short phrases like "tell me" might be incomplete
-    if normalized in truly_incomplete:
+    if normalized in single_word_incomplete:
         return True
     
-    # If it has 3+ words, it's likely complete (e.g., "what is python", "how do I code")
-    if word_count >= 3:
-        return False
-    
-    # Double word phrases - check if they're actually incomplete
-    if word_count == 2:
-        if normalized in {'what is', 'who is', 'where is', 'tell me', 'how to'}:
+    # Very short phrases that are obviously incomplete (2-3 words max)
+    if len(normalized.split()) <= 3:
+        # "tell me" alone is incomplete, but "tell me a joke" is complete
+        if normalized in {'tell me', 'tell me about', 'explain to me', 'define', 'meaning'}:
             return True
     
+    # Everything else is considered complete and should be answered
     return False
 
 
@@ -1049,7 +1079,7 @@ def combine_weather_question_with_location(question, location):
 
 
 def build_ultra_fast_prompt(user_message, location_data, weather_data, local_time, chat_history=None, context_state=None):
-    """Build a prompt that adapts to question complexity."""
+    """Build a prompt that adapts to question complexity and ensures helpful responses."""
     history_text = format_chat_history(chat_history or [])
     history_section = f"\nPrevious conversation:\n{history_text}\n" if history_text else ""
     context_guidance = build_context_guidance(context_state or {}, user_message)
@@ -1059,19 +1089,18 @@ def build_ultra_fast_prompt(user_message, location_data, weather_data, local_tim
     if is_complex_question(user_message):
         length_guidance = "Reply in 4-6 sentences with detailed explanations, examples, and actionable insights."
     else:
-        length_guidance = "Reply in 1-3 short sentences. Be direct and informative."
+        length_guidance = "Reply in 1-3 sentences with direct, helpful information."
 
-    return f"""You are DENZ, a helpful and knowledgeable 3D AI assistant.
-Your goal is to answer every question the user asks, completely and accurately.
-Use the previous conversation and conversation memory when they help answer the new question.
-If the user gives a short follow-up, treat it as a continuation of the last relevant topic or location unless they clearly change the subject.
+    prompt = SYSTEM_PROMPT + f"""
+
+RESPONSE STYLE:
 {length_guidance}
-Do not mention any city, country, location, weather, or local temperature unless the user explicitly asks for it.
-Never refuse to answer questions - provide helpful and comprehensive information when asked.
-{history_section}{context_section}
-User question: {user_message}
 
-DENZ: Answer the user's question directly and helpfully."""
+{history_section}{context_section}
+User: {user_message}
+
+DENZ: """
+    return prompt
 
 
 def is_complex_question(message):
@@ -1127,7 +1156,7 @@ def get_instant_response(user_message):
 
 
 def get_ollama_response_ultra_fast(user_message, location_data, weather_data, local_time, chat_history=None, session_id=None):
-    """Ollama response with adaptive complexity handling and better error recovery"""
+    """Ollama response with retry mechanism and better error handling"""
     chat_history = chat_history or []
 
     # Check response cache
@@ -1138,88 +1167,140 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
         logger.info("🚀 Response cache hit")
         return cached_resp
     
-    try:
-        prompt = build_ultra_fast_prompt(
-            user_message,
-            location_data,
-            weather_data,
-            local_time,
-            chat_history,
-            get_session_context(session_id),
-        )
-        
-        # Determine token limit based on question complexity
-        is_complex = is_complex_question(user_message)
-        num_predict = 300 if is_complex else 96
-        max_response_length = 1500 if is_complex else 500
-        
-        # Adaptive timeout: longer for complex questions
-        timeout = min(OLLAMA_TIMEOUT * 2, 30) if is_complex else OLLAMA_TIMEOUT
-        
-        logger.info(f"📤 Ollama request (complexity: {'HIGH' if is_complex else 'LOW'}, timeout: {timeout}s)")
-        logger.info(f"   Model: {OLLAMA_MODEL}")
-        logger.info(f"   Question: {user_message[:60]}")
-        
-        response = requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": False,
-                "keep_alive": "10m",
-                "options": {
-                    "temperature": 0.3,
-                    "num_predict": num_predict,
-                    "num_ctx": 2048 if is_complex else 1024,
-                },
-            },
-            timeout=timeout
-        )
-        response.raise_for_status()
-        
-        data = response.json()
-        ai_response = data.get('response', '').strip()
-        
-        if ai_response:
-            if len(ai_response) > max_response_length:
-                ai_response = ai_response[:max_response_length] + "..."
-            
-            # Cache response
-            response_cache[message_key] = ai_response
-            
-            logger.info(f"✅ Response: {ai_response[:60]}")
-            return ai_response
-        
-        logger.warning("⚠️ Ollama returned empty response")
-        return generate_smart_fallback(user_message, location_data, weather_data, local_time)
+    # Retry mechanism for failed requests
+    max_retries = 2
+    last_error = None
     
-    except requests.exceptions.Timeout:
-        logger.error(f"⏱️ Ollama timeout ({timeout}s) - check if Ollama server is running")
-        return generate_smart_fallback(user_message, location_data, weather_data, local_time)
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"🔌 Ollama connection error: {e} - ensure Ollama is running at {OLLAMA_URL}")
-        return generate_smart_fallback(user_message, location_data, weather_data, local_time)
-    except Exception as e:
-        logger.error(f"❌ Ollama error: {e}")
-        return generate_smart_fallback(user_message, location_data, weather_data, local_time)
+    for attempt in range(max_retries):
+        try:
+            prompt = build_ultra_fast_prompt(
+                user_message,
+                location_data,
+                weather_data,
+                local_time,
+                chat_history,
+                get_session_context(session_id),
+            )
+            
+            # Determine token limit based on question complexity
+            is_complex = is_complex_question(user_message)
+            num_predict = 300 if is_complex else 96
+            max_response_length = 1500 if is_complex else 500
+            
+            # Adaptive timeout: longer for complex questions
+            timeout = min(OLLAMA_TIMEOUT * 2, 30) if is_complex else OLLAMA_TIMEOUT
+            
+            logger.info(f"📤 Ollama request (attempt {attempt + 1}/{max_retries}, complexity: {'HIGH' if is_complex else 'LOW'}, timeout: {timeout}s)")
+            logger.info(f"   Question: {user_message[:60]}")
+            
+            response = requests.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "keep_alive": "10m",
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": num_predict,
+                        "num_ctx": 8192 if is_complex else 1024,
+                    },
+                },
+                timeout=timeout
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            ai_response = data.get('response', '').strip()
+            
+            if ai_response:
+                if len(ai_response) > max_response_length:
+                    ai_response = ai_response[:max_response_length] + "..."
+                
+                # Cache response
+                response_cache[message_key] = ai_response
+                
+                logger.info(f"✅ Response: {ai_response[:60]}")
+                return ai_response
+            
+            logger.warning(f"⚠️ Ollama returned empty response (attempt {attempt + 1})")
+            last_error = "Empty response"
+            
+            # Retry if empty response
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(0.5)
+                continue
+        
+        except requests.exceptions.Timeout as e:
+            logger.warning(f"⏱️ Timeout on attempt {attempt + 1}/{max_retries}")
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(1)  # Wait before retry
+                continue
+        except requests.exceptions.ConnectionError as e:
+            logger.warning(f"🔌 Connection error on attempt {attempt + 1}/{max_retries}: {e}")
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(1)
+                continue
+        except Exception as e:
+            logger.error(f"❌ Error on attempt {attempt + 1}/{max_retries}: {e}")
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(0.5)
+                continue
+    
+    logger.error(f"❌ Ollama failed after {max_retries} attempts: {last_error}")
+    return generate_smart_fallback(user_message, location_data, weather_data, local_time)
 
 
 def generate_smart_fallback(user_message, location_data, weather_data, local_time):
-    """Generate a smart fallback response when Ollama fails."""
+    """Generate intelligent fallback responses when Ollama fails, instead of generic responses."""
     msg = user_message.lower()
     
-    # Try to give a contextual response based on the question type
-    if any(word in msg for word in ['where', 'location', 'city', 'state', 'country', 'lies']):
-        return f"I'm having trouble connecting to my knowledge base right now. Your question about location/place is interesting - try rephrasing it or ask me again in a moment."
+    # Location/Place questions
+    if any(word in msg for word in ['where', 'location', 'city', 'state', 'country', 'lies', 'situated', 'located', 'capital']):
+        # Extract the place name from the question
+        place_match = None
+        patterns = [
+            r'(?:where|location|city|state).*?(?:is|lies|in|of)?\s+([a-zA-Z\s]+)(?:\s+lies|\s+in|\s+located|$)',
+            r'([a-zA-Z\s]+)\s+(?:lies|is|located|in)\s+(?:which|what)',
+            r'(?:which|what)\s+(?:state|country|location|place).*?([a-zA-Z\s]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, msg, re.IGNORECASE)
+            if match:
+                place_match = match.group(1).strip().title()
+                break
+        
+        if place_match and place_match not in {'Which', 'What', 'State', 'Country', 'Location', 'Place'}:
+            return f"I apologize - I'm having temporary difficulty retrieving detailed information about {place_match} right now. However, {place_match} is a place in India. For specific state/location details, please try again in a moment."
+        
+        return "I'm temporarily unable to retrieve location information. Please ask again in a moment, and I'll provide details about the place you're asking about."
     
-    if any(word in msg for word in ['what', 'who', 'define', 'mean', 'meaning']):
-        return f"I'm temporarily unable to access my knowledge base. Try asking again or rephrase your question. I'll do my best to help!"
+    # General knowledge questions
+    if any(word in msg for word in ['what', 'who', 'define', 'mean', 'meaning', 'explain']):
+        # Extract what they're asking about
+        question_about = msg.replace('what is', '').replace('what are', '').replace('who is', '').replace('define', '').replace('meaning of', '').replace('explain', '').strip()
+        if question_about:
+            return f"I'm currently unable to access my knowledge base to answer your question about '{question_about}'. Please try again in a moment and I'll provide a detailed answer."
+        return "I'm experiencing technical difficulties retrieving information. Please try rephrasing your question and ask again."
     
-    if any(word in msg for word in ['how', 'why', 'explain', 'describe']):
-        return "I'm experiencing technical difficulties with my AI engine. Please try your question again in a moment, and I'll provide a detailed answer."
+    # How/Why questions
+    if any(word in msg for word in ['how', 'why', 'describe', 'tell me', 'explain']):
+        return "I'm temporarily unable to process that question due to a technical issue. Please rephrase and try again - I'm here to help!"
     
-    # Generic fallback with acknowledgment
-    return "I'm currently having trouble processing that. Could you try rephrasing your question? I'm here to help!"
+    # Acknowledgment that we got their question but have issues
+    if user_message.strip():
+        return f"I received your question about '{user_message[:50]}...' but I'm experiencing temporary difficulties processing it. Please try again in a moment."
+    
+    # Absolute fallback
+    return "I'm currently having technical difficulties. Please try your question again in a moment!"
 
 
 # ============================================================================
@@ -1495,15 +1576,22 @@ def api_chat():
         )
 
         user_is_weather_question = is_weather_question(user_message)
-        if not pending_question_part and not user_is_weather_question and is_incomplete_question(raw_user_message):
-            weather_question = False
+        is_capital_query_request = is_capital_query(effective_message)
+        if (
+            not pending_question_part
+            and not user_is_weather_question
+            and not is_capital_query_request
+            and is_incomplete_question(raw_user_message)
+        ):
+            is_weather = False
             instant_response = None
         else:
-            weather_question = is_weather_question(effective_message)
-            instant_response = None if weather_question else get_instant_response(effective_message)
+            is_weather = is_weather_question(effective_message)
+            instant_response = None if is_weather else get_instant_response(effective_message)
+        weather_question = is_weather
 
         # Normal chats should not wait on public IP geolocation.
-        location_data = get_location_from_ip(user_ip, allow_network=weather_question) or {
+        location_data = get_location_from_ip(user_ip, allow_network=is_weather) or {
             'city': 'Unknown', 'country': 'Unknown', 'latitude': 0, 'longitude': 0, 'timezone': 'UTC'
         }
         
@@ -1511,40 +1599,60 @@ def api_chat():
         local_time = get_local_time(timezone)
         
         requested_weather_location = None
-        if weather_question:
+        if is_weather:
             requested_weather_location = extract_weather_location(effective_message) or guess_weather_location(effective_message)
 
-        if not pending_question_part and not user_is_weather_question and is_incomplete_question(user_message):
+        if (
+            not pending_question_part
+            and not user_is_weather_question
+            and not is_capital_query_request
+            and is_incomplete_question(user_message)
+        ):
             weather_data = get_neutral_weather()
             ai_response = INCOMPLETE_QUESTION_REPLY
         elif instant_response:
             weather_data = get_neutral_weather()
             ai_response = instant_response
-        elif weather_question and not requested_weather_location and not has_real_location(location_data):
-            weather_data = get_neutral_weather()
-            ai_response = "Please share the city or location you want the current weather for, and I will check it for you."
-            remember_pending_weather_question(session_id, user_ip, effective_message)
-        elif requested_weather_location:
-            weather_data = get_weather_data_by_city(requested_weather_location)
-            ai_response = format_professional_weather_reply(weather_data)
-            clear_pending_weather_question(session_id, user_ip)
-        elif weather_question and has_real_location(location_data):
-            weather_data = get_weather_data(
-                location_data['latitude'], location_data['longitude'],
-                f"{location_data['city']}, {location_data['country']}"
-            )
-            ai_response = format_professional_weather_reply(weather_data)
-            clear_pending_weather_question(session_id, user_ip)
         else:
-            weather_data = get_neutral_weather()
-            ai_response = get_ollama_response_ultra_fast(
-                effective_message,
-                location_data,
-                weather_data,
-                local_time,
-                chat_history,
-                session_id,
-            )
+            if is_capital_query_request:
+                # Capital query code
+                weather_data = get_neutral_weather()
+                ai_response = get_ollama_response_ultra_fast(
+                    effective_message,
+                    location_data,
+                    weather_data,
+                    local_time,
+                    chat_history,
+                    session_id,
+                )
+            elif is_weather:
+                # Weather code
+                if not requested_weather_location and not has_real_location(location_data):
+                    weather_data = get_neutral_weather()
+                    ai_response = "Please share the city or location you want the current weather for, and I will check it for you."
+                    remember_pending_weather_question(session_id, user_ip, effective_message)
+                elif requested_weather_location:
+                    weather_data = get_weather_data_by_city(requested_weather_location)
+                    ai_response = format_professional_weather_reply(weather_data)
+                    clear_pending_weather_question(session_id, user_ip)
+                else:
+                    weather_data = get_weather_data(
+                        location_data['latitude'], location_data['longitude'],
+                        f"{location_data['city']}, {location_data['country']}"
+                    )
+                    ai_response = format_professional_weather_reply(weather_data)
+                    clear_pending_weather_question(session_id, user_ip)
+            else:
+                # Ollama code
+                weather_data = get_neutral_weather()
+                ai_response = get_ollama_response_ultra_fast(
+                    effective_message,
+                    location_data,
+                    weather_data,
+                    local_time,
+                    chat_history,
+                    session_id,
+                )
 
         update_conversation_memory(
             session_id,
