@@ -927,31 +927,33 @@ INCOMPLETE_QUESTION_REPLY = (
 
 
 def is_incomplete_question(message):
-    """Detect short question fragments that need the next user message."""
+    """Detect very short question fragments that are truly incomplete (e.g., just 'what' or 'tell me')."""
     normalized = re.sub(r'\s+', ' ', message.lower()).strip(" .?!")
     if not normalized:
         return False
 
-    words = normalized.split()
-    incomplete_exact = {
-        'what is', 'what are', 'who is', 'who are', 'where is', 'where are',
-        'why is', 'why are', 'how to', 'how do', 'how can', 'tell me',
-        'explain', 'define', 'meaning of', 'difference between',
+    # Only these exact single/double words are truly incomplete
+    truly_incomplete = {
+        'what', 'who', 'where', 'why', 'how', 'tell me', 'explain',
+        'define', 'what is', 'who is', 'where is',
     }
-    incomplete_endings = {
-        'what', 'who', 'where', 'why', 'how', 'is', 'are', 'about',
-        'of', 'between', 'for', 'to', 'in',
-    }
-
-    if normalized in incomplete_exact:
+    
+    # If it's a complete sentence/phrase, it's not incomplete
+    word_count = len(normalized.split())
+    
+    # Single word or very short phrases like "tell me" might be incomplete
+    if normalized in truly_incomplete:
         return True
-
-    if len(words) <= 4 and (
-        normalized.startswith(('what is ', 'what are ', 'who is ', 'how to ', 'tell me ', 'explain '))
-        or words[-1] in incomplete_endings
-    ):
-        return True
-
+    
+    # If it has 3+ words, it's likely complete (e.g., "what is python", "how do I code")
+    if word_count >= 3:
+        return False
+    
+    # Double word phrases - check if they're actually incomplete
+    if word_count == 2:
+        if normalized in {'what is', 'who is', 'where is', 'tell me', 'how to'}:
+            return True
+    
     return False
 
 
@@ -1047,21 +1049,52 @@ def combine_weather_question_with_location(question, location):
 
 
 def build_ultra_fast_prompt(user_message, location_data, weather_data, local_time, chat_history=None, context_state=None):
-    """Build a concise prompt that can use previous conversation context."""
+    """Build a prompt that adapts to question complexity."""
     history_text = format_chat_history(chat_history or [])
     history_section = f"\nPrevious conversation:\n{history_text}\n" if history_text else ""
     context_guidance = build_context_guidance(context_state or {}, user_message)
     context_section = f"\nConversation memory:\n{context_guidance}\n" if context_guidance else ""
 
-    return f"""You are DENZ, a concise 3D AI assistant.
+    # Adjust response length based on question complexity
+    if is_complex_question(user_message):
+        length_guidance = "Reply in 4-6 sentences with detailed explanations, examples, and actionable insights."
+    else:
+        length_guidance = "Reply in 1-3 short sentences. Be direct and informative."
+
+    return f"""You are DENZ, a helpful and knowledgeable 3D AI assistant.
+Your goal is to answer every question the user asks, completely and accurately.
 Use the previous conversation and conversation memory when they help answer the new question.
 If the user gives a short follow-up, treat it as a continuation of the last relevant topic or location unless they clearly change the subject.
-Reply in 1-3 short sentences.
+{length_guidance}
 Do not mention any city, country, location, weather, or local temperature unless the user explicitly asks for it.
+Never refuse to answer questions - provide helpful and comprehensive information when asked.
 {history_section}{context_section}
-New user question: {user_message}
+User question: {user_message}
 
-DENZ:"""
+DENZ: Answer the user's question directly and helpfully."""
+
+
+def is_complex_question(message):
+    """Detect if a question requires detailed/complex answer."""
+    msg = message.lower()
+    
+    # Questions that typically need more explanation
+    complex_keywords = {
+        'explain', 'how does', 'how do', 'what is', 'why', 'difference',
+        'compare', 'pros and cons', 'advantages', 'disadvantages', 'benefits',
+        'steps', 'process', 'method', 'technique', 'algorithm', 'concept',
+        'theory', 'principle', 'definition', 'example', 'use case',
+        'best practice', 'guideline', 'tutorial', 'guide', 'overview',
+    }
+    
+    word_count = len(message.split())
+    has_complex_keyword = any(keyword in msg for keyword in complex_keywords)
+    
+    # Questions with multiple parts or longer queries are complex
+    if has_complex_keyword or word_count >= 5:
+        return True
+    
+    return False
 
 
 def get_instant_response(user_message):
@@ -1094,7 +1127,7 @@ def get_instant_response(user_message):
 
 
 def get_ollama_response_ultra_fast(user_message, location_data, weather_data, local_time, chat_history=None, session_id=None):
-    """Ultra-fast Ollama response"""
+    """Ollama response with adaptive complexity handling"""
     chat_history = chat_history or []
 
     # Check response cache
@@ -1115,7 +1148,12 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
             get_session_context(session_id),
         )
         
-        logger.info("📤 Ultra-fast Ollama request")
+        # Determine token limit based on question complexity
+        is_complex = is_complex_question(user_message)
+        num_predict = 300 if is_complex else 96
+        max_response_length = 1500 if is_complex else 500
+        
+        logger.info(f"📤 Ollama request (complexity: {'HIGH' if is_complex else 'LOW'})")
         
         response = requests.post(
             f"{OLLAMA_URL}/api/generate",
@@ -1126,8 +1164,8 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
                 "keep_alive": "10m",
                 "options": {
                     "temperature": 0.3,
-                    "num_predict": 96,
-                    "num_ctx": 1024,
+                    "num_predict": num_predict,
+                    "num_ctx": 2048 if is_complex else 1024,
                 },
             },
             timeout=OLLAMA_TIMEOUT
@@ -1138,13 +1176,13 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
         ai_response = data.get('response', '').strip()
         
         if ai_response:
-            if len(ai_response) > 500:
-                ai_response = ai_response[:500] + "..."
+            if len(ai_response) > max_response_length:
+                ai_response = ai_response[:max_response_length] + "..."
             
             # Cache response
             response_cache[message_key] = ai_response
             
-            logger.info(f"✅ Fast response: {ai_response[:30]}")
+            logger.info(f"✅ Response: {ai_response[:40]}")
             return ai_response
         
         logger.warning("⚠️ Ollama failed, using fallback")

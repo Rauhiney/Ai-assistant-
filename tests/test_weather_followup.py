@@ -1,24 +1,24 @@
 import unittest
 from unittest.mock import patch
 
-import denzi
+import denz
 
 
 class WeatherFollowUpTest(unittest.TestCase):
     def setUp(self):
-        with denzi.app.app_context():
-            denzi.db.drop_all()
-            denzi.db.create_all()
-        denzi.pending_weather_requests.clear()
+        with denz.app.app_context():
+            denz.db.drop_all()
+            denz.db.create_all()
+        denz.pending_weather_requests.clear()
 
     def tearDown(self):
-        with denzi.app.app_context():
-            denzi.db.session.remove()
-            denzi.db.drop_all()
-        denzi.pending_weather_requests.clear()
+        with denz.app.app_context():
+            denz.db.session.remove()
+            denz.db.drop_all()
+        denz.pending_weather_requests.clear()
 
     def post(self, message, session_id="s1"):
-        with denzi.app.test_client() as client:
+        with denz.app.test_client() as client:
             response = client.post(
                 "/api/chat",
                 json={"message": message, "session_id": session_id},
@@ -45,21 +45,21 @@ class WeatherFollowUpTest(unittest.TestCase):
             "clouds": 10,
         }
 
-        with patch("denzi.get_location_from_ip", return_value=fallback_location), \
-             patch("denzi.get_ollama_response_ultra_fast", return_value="OLLAMA FALLBACK") as ollama_mock, \
-             patch("denzi.get_weather_data_by_city", return_value=weather_payload) as weather_mock, \
-             patch("denzi.threading.Thread") as thread_mock:
+        with patch("denz.get_location_from_ip", return_value=fallback_location), \
+             patch("denz.get_ollama_response_ultra_fast", return_value="OLLAMA FALLBACK") as ollama_mock, \
+             patch("denz.get_weather_data_by_city", return_value=weather_payload) as weather_mock, \
+             patch("denz.threading.Thread") as thread_mock:
             first_reply = self.post("what is the today weather")
             self.assertEqual(
                 first_reply["reply"],
                 "Please share the city or location you want the current weather for, and I will check it for you.",
             )
 
-            with denzi.app.app_context():
-                saved_messages = denzi.ChatMessage.query.count()
+            with denz.app.app_context():
+                saved_messages = denz.ChatMessage.query.count()
             self.assertEqual(saved_messages, 1)
 
-            denzi.pending_weather_requests.clear()
+            denz.pending_weather_requests.clear()
             second_reply = self.post("dharamshala")
 
         self.assertIn("Dharamsala", second_reply["reply"])
@@ -86,9 +86,9 @@ class WeatherFollowUpTest(unittest.TestCase):
             "clouds": 10,
         }
 
-        with patch("denzi.get_location_from_ip", return_value=fallback_location), \
-             patch("denzi.get_ollama_response_ultra_fast", return_value="Generic chat response") as ollama_mock, \
-             patch("denzi.get_weather_data_by_city", return_value=weather_payload) as weather_mock:
+        with patch("denz.get_location_from_ip", return_value=fallback_location), \
+             patch("denz.get_ollama_response_ultra_fast", return_value="Generic chat response") as ollama_mock, \
+             patch("denz.get_weather_data_by_city", return_value=weather_payload) as weather_mock:
             reply = self.post("dharamshala weasther")
 
         self.assertIn("Dharamsala", reply["reply"])
@@ -114,9 +114,9 @@ class WeatherFollowUpTest(unittest.TestCase):
             "clouds": 10,
         }
 
-        with patch("denzi.get_location_from_ip", return_value=fallback_location), \
-             patch("denzi.get_ollama_response_ultra_fast", return_value="Generic chat response") as ollama_mock, \
-             patch("denzi.get_weather_data_by_city", return_value=weather_payload) as weather_mock:
+        with patch("denz.get_location_from_ip", return_value=fallback_location), \
+             patch("denz.get_ollama_response_ultra_fast", return_value="Generic chat response") as ollama_mock, \
+             patch("denz.get_weather_data_by_city", return_value=weather_payload) as weather_mock:
             self.post("what is weather")
             self.post("dharamshala")
             reply = self.post("capital of india")
