@@ -111,6 +111,11 @@ body.light-mode .mini-map-card {
     box-shadow: 0 12px 40px rgba(16, 24, 40, 0.08);
 }
 
+body.light-mode .geolocation-interface {
+    background: rgba(255, 255, 255, 0.88);
+    box-shadow: 0 12px 40px rgba(16, 24, 40, 0.08);
+}
+
 body.light-mode .bot-message .message-content,
 body.light-mode .suggestion-btn,
 body.light-mode .control-btn,
@@ -880,9 +885,7 @@ body.light-mode .user-message .message-content {
 }
 
 .avatar-3d-container {
-    flex: 1;
-    position: relative;
-    background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(255, 107, 157, 0.05));
+    display: none;
 }
 
 .avatar-3d-container canvas {
@@ -891,9 +894,123 @@ body.light-mode .user-message .message-content {
     display: block;
 }
 
+.geolocation-interface {
+    width: calc(100% - 2rem);
+    margin: var(--sp-sm) var(--sp-sm) var(--sp-sm);
+    padding: var(--sp-sm);
+    border: 1px solid rgba(0, 255, 136, 0.24);
+    border-radius: var(--rad-sm);
+    background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(139, 92, 246, 0.14));
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+}
+
+.geo-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--sp-sm);
+    margin-bottom: var(--sp-sm);
+}
+
+.geo-kicker {
+    display: block;
+    color: var(--accent-3d);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 0.2rem;
+}
+
+.geo-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.geo-refresh-btn {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(0, 255, 136, 0.38);
+    border-radius: var(--rad-sm);
+    background: rgba(0, 255, 136, 0.1);
+    color: var(--accent-3d);
+    cursor: pointer;
+    transition: all var(--trans-normal);
+}
+
+.geo-refresh-btn:hover {
+    background: var(--accent-3d);
+    color: #06111a;
+    transform: translateY(-2px);
+}
+
+.geo-refresh-btn.loading i {
+    animation: spin-3d 1s linear infinite;
+}
+
+.geo-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-sm);
+}
+
+.geo-metric {
+    min-width: 0;
+    padding: 0.65rem;
+    border: 1px solid rgba(139, 92, 246, 0.22);
+    border-radius: var(--rad-sm);
+    background: rgba(10, 14, 39, 0.28);
+}
+
+.geo-label {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--text-tertiary);
+    font-size: 0.68rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.geo-value {
+    display: block;
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: 0.92rem;
+    font-weight: 700;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.geo-status-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-xs);
+    margin-top: var(--sp-sm);
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+
+.geo-pulse {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 9px;
+    border-radius: 50%;
+    background: var(--accent-3d);
+    box-shadow: 0 0 14px rgba(0, 255, 136, 0.72);
+    animation: pulse-3d 1.6s ease-in-out infinite;
+}
+
 .mini-map-card {
     width: calc(100% - 2rem);
-    height: 515px;
+    height: clamp(240px, 32vh, 330px);
+    min-height: 240px;
     margin: 0 var(--sp-sm) var(--sp-sm);
     overflow: hidden;
     border: 1px solid rgba(139, 92, 246, 0.35);
@@ -903,8 +1020,8 @@ body.light-mode .user-message .message-content {
 }
 
 .mini-map-card iframe {
-    width: 1000%;
-    height: 1000%;
+    width: 100%;
+    height: 100%;
     display: block;
     border: 0;
     filter: saturate(0.82) contrast(1.08) brightness(0.86);
@@ -1452,6 +1569,7 @@ body.light-mode .user-message .message-content {
     background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(255, 107, 157, 0.1));
     border-radius: var(--rad-xl);
     border: 1px solid var(--border-3d);
+    
 }
 
 .about-hero-3d h1 {
@@ -1466,17 +1584,20 @@ body.light-mode .user-message .message-content {
 .about-hero-3d p {
     font-size: 1.25rem;
     color: var(--text-secondary);
+    
 }
 
 .about-section-3d {
     margin-bottom: var(--sp-xxl);
     animation: float-up 0.8s ease-out both;
+    
 }
 
 .about-section-3d h2 {
     font-size: 2rem;
     margin-bottom: var(--sp-lg);
-    color: var(--text-primary);
+    color: var(--text-primary)
+     
 }
 
 .section-content {
@@ -1852,22 +1973,33 @@ body.light-mode .user-message .message-content {
         left: -100%;
         top: 70px;
         flex-direction: column;
-        background: rgba(10, 14, 39, 0.95);
+        background: rgba(6, 11, 40, 0.95);
         width: 100%;
         text-align: center;
         transition: 0.3s;
         padding: var(--sp-lg) 0;
         gap: var(--sp-md);
+         display:none;
     }
 
     .nav-menu.active {
         left: 0;
+         display:none;
     }
 
     .mini-map-card {
         height: 700px;
         min-height: 700px;
         flex-basis: 180px;
+        
+    }
+
+    .geolocation-interface {
+        padding: var(--sp-sm);
+    }
+
+    .geo-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .avatar-3d-container {
@@ -1957,6 +2089,10 @@ body.light-mode .user-message .message-content {
     }
 
     .welcome-suggestions {
+        grid-template-columns: 1fr;
+    }
+
+    .geo-grid {
         grid-template-columns: 1fr;
     }
 }

@@ -1155,6 +1155,9 @@ function setupChatInterface() {
             if (response && response.success) {
                 addMessage(response.response, 'bot');
                 updateMiniMap(response.location);
+                updateGeolocationInterface(response.location, {
+                    status: 'Updated from chat context',
+                });
                 
                 // Trigger 3D effect
                 if (response['3d_effect']) {
@@ -1220,30 +1223,159 @@ function updateMiniMap(location) {
 }
 
 /**
+ * Update Geolocation Interface
+ */
+function updateGeolocationInterface(location, options = {}) {
+    const cityElement = document.getElementById('geo-city');
+    const countryElement = document.getElementById('geo-country');
+    const latElement = document.getElementById('geo-lat');
+    const lngElement = document.getElementById('geo-lng');
+    const statusElement = document.getElementById('geo-status');
+
+    if (!cityElement || !countryElement || !latElement || !lngElement || !statusElement) return;
+
+    const coords = location && location.coords ? location.coords : {};
+    const lat = Number(coords.lat);
+    const lng = Number(coords.lng);
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+
+    if (location) {
+        cityElement.textContent = location.city || options.city || (hasCoords ? 'Current location' : 'Unknown');
+        countryElement.textContent = location.country || options.country || location.timezone || 'Local device';
+    }
+
+    if (hasCoords) {
+        latElement.textContent = lat.toFixed(5);
+        lngElement.textContent = lng.toFixed(5);
+    }
+
+    statusElement.textContent = options.status || (hasCoords ? 'Location locked on map' : 'Location unavailable');
+}
+
+async function fetchServerLocationForMap(statusPrefix = 'Using network location') {
+    const data = await fetchAPI('/api/location');
+    if (!data || !data.success || !data.location) return false;
+
+    const location = {
+        city: data.location.city,
+        country: data.location.country,
+        timezone: data.timezone || data.location.timezone,
+        coords: {
+            lat: data.location.latitude,
+            lng: data.location.longitude,
+        },
+    };
+
+    updateMiniMap(location);
+    updateGeolocationInterface(location, {
+        status: `${statusPrefix}${location.timezone ? ` (${location.timezone})` : ''}`,
+    });
+
+    return true;
+}
+
+async function resolveLocationNameFromCoords(lat, lng) {
+    try {
+        const params = new URLSearchParams({
+            latitude: lat,
+            longitude: lng,
+            localityLanguage: 'en',
+        });
+        const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?${params.toString()}`);
+
+        if (!response.ok) return null;
+
+        const data = await response.json();
+        const city = data.city || data.locality || data.principalSubdivision || data.localityInfo?.administrative?.[0]?.name;
+        const country = data.countryName || data.principalSubdivision || 'Current location';
+
+        if (!city && !country) return null;
+
+        return {
+            city: city || 'Current location',
+            country,
+        };
+    } catch (error) {
+        console.warn('Reverse geocode failed:', error);
+        return null;
+    }
+}
+
+/**
  * Initialize Mini Map With Browser Location
  */
-function initCurrentLocationMap() {
+async function initCurrentLocationMap() {
     const frame = document.getElementById('mini-map-frame');
-    if (!frame || !navigator.geolocation) return;
+    const refreshBtn = document.getElementById('geo-refresh-btn');
+    if (!frame) return;
 
-    navigator.geolocation.getCurrentPosition(
-        (position) => {
-            updateMiniMap({
-                coords: {
-                    lat: position.coords.latitude,
-                    lng: position.coords.longitude,
-                },
-            });
-        },
-        (error) => {
-            console.warn('Location permission unavailable:', error.message);
-        },
-        {
-            enableHighAccuracy: false,
-            timeout: 3000,
-            maximumAge: 300000,
+    const setLoading = (isLoading) => {
+        if (!refreshBtn) return;
+        refreshBtn.classList.toggle('loading', isLoading);
+        refreshBtn.disabled = isLoading;
+    };
+
+    const requestBrowserLocation = () => new Promise((resolve) => {
+        if (!navigator.geolocation) {
+            resolve(false);
+            return;
         }
-    );
+
+        updateGeolocationInterface(null, {
+            status: 'Requesting browser location',
+        });
+
+        navigator.geolocation.getCurrentPosition(
+            async (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                const resolvedPlace = await resolveLocationNameFromCoords(lat, lng);
+                const location = {
+                    city: resolvedPlace?.city || 'Current location',
+                    country: resolvedPlace?.country || 'Local device',
+                    coords: {
+                        lat,
+                        lng,
+                    },
+                };
+
+                updateMiniMap(location);
+                updateGeolocationInterface(location, {
+                    status: resolvedPlace
+                        ? `Location resolved, accuracy about ${Math.round(position.coords.accuracy)} m`
+                        : `Coordinates active, accuracy about ${Math.round(position.coords.accuracy)} m`,
+                });
+                resolve(true);
+            },
+            (error) => {
+                console.warn('Location permission unavailable:', error.message);
+                updateGeolocationInterface(null, {
+                    status: 'Browser location unavailable, trying network location',
+                });
+                resolve(false);
+            },
+            {
+                enableHighAccuracy: false,
+                timeout: 3000,
+                maximumAge: 300000,
+            }
+        );
+    });
+
+    const refreshLocation = async () => {
+        setLoading(true);
+        const hasBrowserLocation = await requestBrowserLocation();
+        if (!hasBrowserLocation) {
+            await fetchServerLocationForMap();
+        }
+        setLoading(false);
+    };
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', refreshLocation);
+    }
+
+    await refreshLocation();
 }
 /**
  * Add Chat Message

@@ -44,6 +44,40 @@
         <div class="chat-3d-section">
             <div class="avatar-3d-container" id="avatar-3d-container"></div>
 
+            <div class="geolocation-interface" aria-label="Geolocation interface">
+                <div class="geo-header">
+                    <div>
+                        <span class="geo-kicker">Live Position</span>
+                        <h2>Geolocation Interface</h2>
+                    </div>
+                    <button class="geo-refresh-btn" id="geo-refresh-btn" type="button" title="Refresh location">
+                        <i class="fas fa-location-crosshairs"></i>
+                    </button>
+                </div>
+                <div class="geo-grid">
+                    <div class="geo-metric">
+                        <span class="geo-label">City</span>
+                        <span class="geo-value" id="geo-city">Detecting</span>
+                    </div>
+                    <div class="geo-metric">
+                        <span class="geo-label">Region</span>
+                        <span class="geo-value" id="geo-country">Waiting</span>
+                    </div>
+                    <div class="geo-metric">
+                        <span class="geo-label">Latitude</span>
+                        <span class="geo-value" id="geo-lat">--</span>
+                    </div>
+                    <div class="geo-metric">
+                        <span class="geo-label">Longitude</span>
+                        <span class="geo-value" id="geo-lng">--</span>
+                    </div>
+                </div>
+                <div class="geo-status-row">
+                    <span class="geo-pulse" aria-hidden="true"></span>
+                    <span id="geo-status">Requesting browser location</span>
+                </div>
+            </div>
+
             <div class="mini-map-card" aria-label="Map preview">
                 <iframe
                     id="mini-map-frame"
