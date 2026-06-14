@@ -13,6 +13,7 @@ import threading
 import time
 import re
 import difflib
+from duckduckgo_search import DDGS
 
 # ============================================================================
 # FLASK APP SETUP
@@ -61,16 +62,19 @@ You are DENZ, an advanced AI assistant created by Rauhiney Kashyap.
 
 You provide accurate, detailed and helpful answers.
 
-Think step by step.
+You can use tool results supplied by the backend for live weather, location/maps,
+and web search. Treat tool results as the freshest available context.
 
 If the question is technical, explain clearly.
 
 If the user asks for code, provide complete code.
 
 Maintain a friendly and intelligent personality.
+
+Do not reveal hidden reasoning or thinking text. Give only the final answer.
 """
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")  # Upgraded to llama3.1:8b for better responses
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")  # Upgraded to qwen3:8b for better performance and speed
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "15"))  # Increased from 4s to 15s for better responses
 
 # Weather API
@@ -207,6 +211,8 @@ def normalize_entity_from_text(message):
 def is_short_followup(message, context):
     text = normalize_conversation_text(message)
     if not context or not context.get('last_intent'):
+        return False
+    if is_capital_query(text):
         return False
     if text in {'next', 'more', 'again', 'same', 'what about it', 'what about', 'that', 'this', 'it', 'also', 'and'}:
         return True
@@ -933,6 +939,233 @@ def get_neutral_weather():
 
 
 # ============================================================================
+# WEB SEARCH FUNCTIONS
+# ============================================================================
+
+def perform_web_search(query, max_results=5):
+    """Perform web search using DuckDuckGo"""
+    try:
+        logger.info(f"🔍 Performing web search for: {query}")
+        
+        ddgs = DDGS()
+        results = list(ddgs.text(query, max_results=max_results))
+        
+        if results:
+            formatted_results = []
+            for i, result in enumerate(results, 1):
+                formatted_results.append({
+                    'rank': i,
+                    'title': result.get('title', 'N/A'),
+                    'body': result.get('body', 'N/A')[:200],  # Truncate for brevity
+                    'href': result.get('href', 'N/A')
+                })
+            
+            logger.info(f"✅ Found {len(formatted_results)} web results")
+            return formatted_results
+        else:
+            logger.warning("⚠️ No web search results found")
+            return []
+    
+    except Exception as e:
+        logger.error(f"❌ Web search error: {e}")
+        return []
+
+
+def format_web_search_response(results, original_query):
+    """Format web search results into a conversational response"""
+    if not results:
+        return f"I couldn't find relevant web results for '{original_query}'. Please try rephrasing your question."
+    
+    response = f"Here's what I found online about '{original_query}':\n\n"
+    
+    for result in results[:3]:  # Show top 3 results
+        response += f"• **{result['title']}**: {result['body']}\n"
+    
+    return response.strip()
+
+
+# ============================================================================
+# AGENT/ROUTER SYSTEM
+# ============================================================================
+
+def extract_map_query(message):
+    """Extract the place the user wants to see on a map, if one is present."""
+    msg = re.sub(r'\s+', ' ', message).strip(" .?!")
+    patterns = [
+        r'\b(?:map|maps|direction|directions|route|navigate|navigation)\s+(?:to|for|of)?\s*([a-zA-Z0-9\s,.-]+)$',
+        r'\b(?:show|open|find)\s+(?:me\s+)?(?:a\s+)?map\s+(?:of|for)?\s*([a-zA-Z0-9\s,.-]+)$',
+        r'\bwhere\s+is\s+([a-zA-Z0-9\s,.-]+)$',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, msg, re.IGNORECASE)
+        if match:
+            place = re.sub(
+                r'\b(on map|in map|near me|please|pls|now|today)\b',
+                '',
+                match.group(1),
+                flags=re.IGNORECASE,
+            ).strip(" ,.-")
+            if place:
+                return place
+    return None
+
+
+def build_openstreetmap_search_url(place):
+    encoded = requests.utils.quote(place)
+    return f"https://www.openstreetmap.org/search?query={encoded}"
+
+
+def build_openstreetmap_marker_url(latitude, longitude):
+    return f"https://www.openstreetmap.org/?mlat={latitude}&mlon={longitude}#map=13/{latitude}/{longitude}"
+
+
+def run_location_tool(message, location_data):
+    """Return a concise map/location answer and structured map metadata."""
+    requested_place = extract_map_query(message)
+    location_data = location_data or get_fallback_location()
+    has_location = has_real_location(location_data)
+
+    if requested_place:
+        map_data = {
+            'type': 'place_search',
+            'query': requested_place,
+            'provider': 'OpenStreetMap',
+            'url': build_openstreetmap_search_url(requested_place),
+        }
+        reply = (
+            f"I can look up {requested_place} on OpenStreetMap: {map_data['url']}. "
+            "Use that map result for the exact pin, nearby places, and directions."
+        )
+        return reply, map_data
+
+    if has_location:
+        lat = location_data.get('latitude')
+        lng = location_data.get('longitude')
+        city = location_data.get('city', 'your area')
+        country = location_data.get('country', '')
+        map_data = {
+            'type': 'current_location',
+            'city': city,
+            'country': country,
+            'lat': lat,
+            'lng': lng,
+            'provider': 'OpenStreetMap',
+            'url': build_openstreetmap_marker_url(lat, lng),
+        }
+        reply = (
+            f"Your network location appears to be {city}, {country} "
+            f"({lat}, {lng}). Map: {map_data['url']}"
+        )
+        return reply, map_data
+
+    map_data = {
+        'type': 'unavailable',
+        'provider': 'OpenStreetMap',
+        'url': 'https://www.openstreetmap.org',
+    }
+    return (
+        "I could not determine your current location yet. Share a city/place name, "
+        "or allow browser location, and I will show the map for it."
+    ), map_data
+
+class ToolRouter:
+    """Intelligent router to decide which tool to use based on user query"""
+    
+    @staticmethod
+    def classify_intent(message):
+        """Classify the user's intent to determine which tool to use"""
+        msg = message.lower()
+        words = set(re.findall(r'[a-z0-9]+', msg))
+        
+        # Weather queries
+        weather_keywords = ['weather', 'temperature', 'forecast', 'rain', 'humidity', 'climate', 'hot', 'cold', 'snow']
+        if any(keyword in msg for keyword in weather_keywords):
+            return 'weather'
+        
+        # Location/maps queries
+        map_keywords = {'map', 'maps', 'direction', 'directions', 'route', 'navigate', 'navigation'}
+        if words.intersection(map_keywords):
+            return 'maps'
+
+        location_phrases = ['my location', 'current location', 'where am i']
+        location_words = {'coordinates', 'lat', 'latitude', 'lon', 'lng', 'longitude', 'address'}
+        capital_keywords = ['capital of', 'state capital', 'capital city']
+        if any(phrase in msg for phrase in location_phrases + capital_keywords) or words.intersection(location_words):
+            return 'location'
+        
+        # Web search queries: explicit search or time-sensitive requests.
+        search_keywords = [
+            'search', 'find online', 'look up', 'look for', 'latest',
+            'news', 'current', 'recent', 'today', 'trending', 'upcoming',
+            'price', 'stock', 'score', 'schedule'
+        ]
+        if any(keyword in msg for keyword in search_keywords):
+            # Additional check: if it's a factual question about something not in our tools
+            if not any(k in msg for k in ['weather', 'location', 'map', 'capital']):
+                return 'web_search'
+        
+        # General chat
+        return 'chat'
+    
+    @staticmethod
+    def should_use_web_search(message):
+        """Determine if web search would be beneficial"""
+        msg = message.lower()
+        
+        # Questions that benefit from real-time information
+        search_queries = [
+            'latest', 'recent', 'new', 'current', 'today', 'news',
+            'trending', 'upcoming', 'schedule', 'announce', 'released',
+            'price', 'stock', 'election', 'score', 'result',
+            'how to', 'tutorial', 'guide', 'best', 'top'
+        ]
+        
+        if any(keyword in msg for keyword in search_queries):
+            return True
+        
+        # Time-sensitive question patterns only.
+        question_patterns = [
+            r'^who is .* current',
+            r'^what is .* latest',
+            r'^when is .* upcoming',
+        ]
+        if any(re.match(pattern, msg) for pattern in question_patterns):
+            return True
+        
+        return False
+    
+    @staticmethod
+    def route_request(message, location_data):
+        """Route the request to the appropriate tool"""
+        intent = ToolRouter.classify_intent(message)
+        
+        routing_info = {
+            'intent': intent,
+            'should_search': False,
+            'use_location': False,
+            'use_weather': False,
+            'use_chat': True,
+            'tool': 'chat'
+        }
+        
+        if intent == 'weather':
+            routing_info['use_weather'] = True
+            routing_info['use_chat'] = False
+            routing_info['tool'] = 'weather'
+        elif intent in ('location', 'maps'):
+            routing_info['use_location'] = True
+            routing_info['use_chat'] = False
+            routing_info['tool'] = 'maps' if intent == 'maps' else 'location'
+        elif intent == 'web_search':
+            routing_info['should_search'] = True
+            routing_info['use_chat'] = True
+            routing_info['tool'] = 'web_search'
+        
+        return routing_info
+
+
+# ============================================================================
 # OLLAMA FUNCTIONS (ULTRA FAST)
 # ============================================================================
 
@@ -1078,12 +1311,20 @@ def combine_weather_question_with_location(question, location):
     return re.sub(r'\s+', ' ', f"{question} in {location}").strip()
 
 
-def build_ultra_fast_prompt(user_message, location_data, weather_data, local_time, chat_history=None, context_state=None):
+def build_ultra_fast_prompt(user_message, location_data, weather_data, local_time, chat_history=None, context_state=None, web_search_results=None):
     """Build a prompt that adapts to question complexity and ensures helpful responses."""
     history_text = format_chat_history(chat_history or [])
     history_section = f"\nPrevious conversation:\n{history_text}\n" if history_text else ""
     context_guidance = build_context_guidance(context_state or {}, user_message)
     context_section = f"\nConversation memory:\n{context_guidance}\n" if context_guidance else ""
+    
+    # Add web search context if available
+    search_context = ""
+    if web_search_results:
+        search_context = "\nWeb Search Results:\n"
+        for result in web_search_results[:3]:
+            search_context += f"- {result['title']}: {result['body']} Source: {result['href']}\n"
+        search_context += "When using web search results, mention that the answer is based on current web results and include source links when useful.\n\n"
 
     # Adjust response length based on question complexity
     if is_complex_question(user_message):
@@ -1096,8 +1337,8 @@ def build_ultra_fast_prompt(user_message, location_data, weather_data, local_tim
 RESPONSE STYLE:
 {length_guidance}
 
-{history_section}{context_section}
-User: {user_message}
+{history_section}{context_section}{search_context}User: {user_message}
+/no_think
 
 DENZ: """
     return prompt
@@ -1106,6 +1347,8 @@ DENZ: """
 def is_complex_question(message):
     """Detect if a question requires detailed/complex answer."""
     msg = message.lower()
+    if any(phrase in msg for phrase in ('one sentence', 'brief', 'short answer', 'quick answer')):
+        return False
     
     # Questions that typically need more explanation
     complex_keywords = {
@@ -1120,7 +1363,7 @@ def is_complex_question(message):
     has_complex_keyword = any(keyword in msg for keyword in complex_keywords)
     
     # Questions with multiple parts or longer queries are complex
-    if has_complex_keyword or word_count >= 5:
+    if has_complex_keyword or word_count >= 10:
         return True
     
     return False
@@ -1155,7 +1398,22 @@ def get_instant_response(user_message):
     return None
 
 
-def get_ollama_response_ultra_fast(user_message, location_data, weather_data, local_time, chat_history=None, session_id=None):
+def clean_ollama_response(response_text):
+    """Remove Qwen/Ollama thinking traces and return only the user-facing answer."""
+    if not response_text:
+        return ""
+
+    cleaned = re.sub(r'<think>.*?</think>', '', response_text, flags=re.IGNORECASE | re.DOTALL)
+    cleaned = re.sub(
+        r'^\s*Thinking\.\.\..*?\.\.\.done thinking\.\s*',
+        '',
+        cleaned,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return cleaned.strip()
+
+
+def get_ollama_response_ultra_fast(user_message, location_data, weather_data, local_time, chat_history=None, session_id=None, web_search_results=None):
     """Ollama response with retry mechanism and better error handling"""
     chat_history = chat_history or []
 
@@ -1180,6 +1438,7 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
                 local_time,
                 chat_history,
                 get_session_context(session_id),
+                web_search_results,
             )
             
             # Determine token limit based on question complexity
@@ -1188,7 +1447,7 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
             max_response_length = 1500 if is_complex else 500
             
             # Adaptive timeout: longer for complex questions
-            timeout = min(OLLAMA_TIMEOUT * 2, 30) if is_complex else OLLAMA_TIMEOUT
+            timeout = min(OLLAMA_TIMEOUT * 2, 120) if is_complex else OLLAMA_TIMEOUT
             
             logger.info(f"📤 Ollama request (attempt {attempt + 1}/{max_retries}, complexity: {'HIGH' if is_complex else 'LOW'}, timeout: {timeout}s)")
             logger.info(f"   Question: {user_message[:60]}")
@@ -1199,6 +1458,7 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
                     "model": OLLAMA_MODEL,
                     "prompt": prompt,
                     "stream": False,
+                    "think": False,
                     "keep_alive": "10m",
                     "options": {
                         "temperature": 0.3,
@@ -1211,7 +1471,7 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
             response.raise_for_status()
             
             data = response.json()
-            ai_response = data.get('response', '').strip()
+            ai_response = clean_ollama_response(data.get('response', ''))
             
             if ai_response:
                 if len(ai_response) > max_response_length:
@@ -1524,7 +1784,7 @@ def api_chat():
     start_time = time.time()
     
     try:
-        logger.info("🔄 ULTRA FAST CHAT REQUEST")
+        logger.info("🔄 ULTRA FAST CHAT REQUEST WITH INTELLIGENT ROUTING")
         
         data = request.get_json()
         user_ip = get_user_ip(request)
@@ -1543,6 +1803,12 @@ def api_chat():
 
         user_message = resolve_followup_message(raw_user_message, session_id)
         chat_history = get_recent_chat_history(session_id)
+        
+        # ===== LOCATION CONTEXT =====
+        location_data = get_location_from_ip(user_ip, allow_network=True) or {
+            'city': 'Unknown', 'country': 'Unknown', 'latitude': 0, 'longitude': 0, 'timezone': 'UTC'
+        }
+        
         pending_question_part = get_pending_question_part(chat_history)
         pending_weather_question = None
         if not pending_question_part:
@@ -1575,6 +1841,16 @@ def api_chat():
             else user_message
         )
 
+        # ===== INTELLIGENT ROUTING =====
+        routing_info = ToolRouter.route_request(effective_message, location_data)
+        logger.info(f"Router Intent: {routing_info['intent']} | Tool: {routing_info['tool']} | Search: {routing_info['should_search']} | Weather: {routing_info['use_weather']} | Location: {routing_info['use_location']}")
+        
+        # ===== GET WEB SEARCH RESULTS IF NEEDED =====
+        web_search_results = None
+        if routing_info['should_search'] and ToolRouter.should_use_web_search(effective_message):
+            logger.info(f"Fetching web search results for: {effective_message}")
+            web_search_results = perform_web_search(effective_message, max_results=5)
+
         user_is_weather_question = is_weather_question(user_message)
         is_capital_query_request = is_capital_query(effective_message)
         if (
@@ -1590,11 +1866,6 @@ def api_chat():
             instant_response = None if is_weather else get_instant_response(effective_message)
         weather_question = is_weather
 
-        # Normal chats should not wait on public IP geolocation.
-        location_data = get_location_from_ip(user_ip, allow_network=is_weather) or {
-            'city': 'Unknown', 'country': 'Unknown', 'latitude': 0, 'longitude': 0, 'timezone': 'UTC'
-        }
-        
         timezone = location_data.get('timezone') or get_timezone_from_coords(location_data['latitude'], location_data['longitude'])
         local_time = get_local_time(timezone)
         
@@ -1602,6 +1873,7 @@ def api_chat():
         if is_weather:
             requested_weather_location = extract_weather_location(effective_message) or guess_weather_location(effective_message)
 
+        map_data = None
         if (
             not pending_question_part
             and not user_is_weather_question
@@ -1614,7 +1886,10 @@ def api_chat():
             weather_data = get_neutral_weather()
             ai_response = instant_response
         else:
-            if is_capital_query_request:
+            if routing_info['use_location'] and not is_capital_query_request:
+                weather_data = get_neutral_weather()
+                ai_response, map_data = run_location_tool(effective_message, location_data)
+            elif is_capital_query_request:
                 # Capital query code
                 weather_data = get_neutral_weather()
                 ai_response = get_ollama_response_ultra_fast(
@@ -1624,6 +1899,7 @@ def api_chat():
                     local_time,
                     chat_history,
                     session_id,
+                    web_search_results,  # Pass web search results
                 )
             elif is_weather:
                 # Weather code
@@ -1643,7 +1919,7 @@ def api_chat():
                     ai_response = format_professional_weather_reply(weather_data)
                     clear_pending_weather_question(session_id, user_ip)
             else:
-                # Ollama code
+                # General chat with optional web search augmentation
                 weather_data = get_neutral_weather()
                 ai_response = get_ollama_response_ultra_fast(
                     effective_message,
@@ -1652,6 +1928,7 @@ def api_chat():
                     local_time,
                     chat_history,
                     session_id,
+                    web_search_results,  # Pass web search results for context
                 )
 
         update_conversation_memory(
@@ -1713,7 +1990,13 @@ def api_chat():
             'local_time': local_time,
             'success': True,
             'model': OLLAMA_MODEL,
-            'response_time': response_time
+            'response_time': response_time,
+            'routing': routing_info,  # Include routing info for debugging
+            'web_search': {
+                'performed': routing_info['should_search'],
+                'results_count': len(web_search_results) if web_search_results else 0
+            },
+            'map': map_data
         }
         
         logger.info(f"⚡ Response time: {response_time}s")
@@ -1816,7 +2099,16 @@ def get_assistant_info():
             'version': ASSISTANT_VERSION,
             'ollama_url': OLLAMA_URL,
             'ollama_model': OLLAMA_MODEL,
-            'capabilities': ['Ultra-fast AI chat', 'Real-time location', 'Live weather', '3D effects', 'In-memory caching'],
+            'capabilities': [
+                'Qwen3 8B local AI chat',
+                'Agent/router tool selection',
+                'Web search',
+                'Live weather',
+                'Location lookup',
+                'OpenStreetMap links',
+                '3D effects',
+                'In-memory caching',
+            ],
             'success': True
         }), 200
     except Exception as e:
@@ -1949,6 +2241,7 @@ def warmup_ollama():
                     "model": OLLAMA_MODEL,
                     "prompt": warmup_prompt,
                     "stream": False,
+                    "think": False,
                     "keep_alive": "10m",
                     "options": {
                         "temperature": 0.1,
@@ -1995,7 +2288,8 @@ if __name__ == '__main__':
     logger.info(f"🚀 Starting {ASSISTANT_NAME} {ASSISTANT_VERSION}")
     logger.info("="*70)
     logger.info("⚡ ULTRA SPEED OPTIMIZATIONS:")
-    logger.info("  ✅ Llama3.2:1B - Fastest model")
+    logger.info(f"  ✅ {OLLAMA_MODEL} - upgraded reasoning model")
+    logger.info("  ✅ Agent/router for weather, maps, location, web search, and chat")
     logger.info("  ✅ In-memory LRU caching")
     logger.info("  ✅ Response caching")
     logger.info("  ✅ Async database saves")

@@ -10,12 +10,20 @@ class WeatherFollowUpTest(unittest.TestCase):
             denz.db.drop_all()
             denz.db.create_all()
         denz.pending_weather_requests.clear()
+        denz.conversation_memory.clear()
+        denz.location_cache.clear()
+        denz.weather_cache.clear()
+        denz.response_cache.clear()
 
     def tearDown(self):
         with denz.app.app_context():
             denz.db.session.remove()
             denz.db.drop_all()
         denz.pending_weather_requests.clear()
+        denz.conversation_memory.clear()
+        denz.location_cache.clear()
+        denz.weather_cache.clear()
+        denz.response_cache.clear()
 
     def post(self, message, session_id="s1"):
         with denz.app.test_client() as client:
@@ -126,6 +134,53 @@ class WeatherFollowUpTest(unittest.TestCase):
         self.assertEqual(follow_up["reply"], "Generic chat response")
         self.assertEqual(ollama_mock.call_count, 2)
         self.assertEqual(weather_mock.call_count, 1)
+
+    def test_map_query_uses_location_tool_without_ollama(self):
+        fallback_location = {
+            "city": "Unknown",
+            "country": "Unknown",
+            "latitude": 0,
+            "longitude": 0,
+            "timezone": "UTC",
+        }
+
+        with patch("denz.get_location_from_ip", return_value=fallback_location), \
+             patch("denz.get_ollama_response_ultra_fast", return_value="OLLAMA") as ollama_mock:
+            reply = self.post("show map of Delhi")
+
+        self.assertIn("OpenStreetMap", reply["reply"])
+        self.assertEqual(reply["routing"]["tool"], "maps")
+        self.assertEqual(reply["map"]["query"], "Delhi")
+        self.assertEqual(ollama_mock.call_count, 0)
+
+    def test_web_search_query_augments_ollama(self):
+        fallback_location = {
+            "city": "Unknown",
+            "country": "Unknown",
+            "latitude": 0,
+            "longitude": 0,
+            "timezone": "UTC",
+        }
+        search_results = [
+            {
+                "rank": 1,
+                "title": "Example result",
+                "body": "Fresh result body",
+                "href": "https://example.com",
+            }
+        ]
+
+        with patch("denz.get_location_from_ip", return_value=fallback_location), \
+             patch("denz.perform_web_search", return_value=search_results) as search_mock, \
+             patch("denz.get_ollama_response_ultra_fast", return_value="Search assisted answer") as ollama_mock:
+            reply = self.post("latest AI news")
+
+        self.assertEqual(reply["reply"], "Search assisted answer")
+        self.assertEqual(reply["routing"]["tool"], "web_search")
+        self.assertTrue(reply["web_search"]["performed"])
+        self.assertEqual(reply["web_search"]["results_count"], 1)
+        search_mock.assert_called_once()
+        self.assertEqual(ollama_mock.call_args.args[6], search_results)
 
 
 if __name__ == "__main__":
