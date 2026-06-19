@@ -1226,6 +1226,9 @@ function setupChatInterface() {
                 if (response['3d_effect']) {
                     trigger3DEffect(response['3d_effect']);
                 }
+            } else {
+                addMessage('I could not reach the DENZ backend. On mobile, open the laptop LAN address shown in the server console and keep both devices on the same Wi-Fi.', 'bot');
+                showToast('Backend connection failed', 'error', 4000);
             }
         } finally {
             isSending = false;

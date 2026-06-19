@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError
 from datetime import datetime
 import logging
 import math
@@ -13,6 +14,7 @@ import threading
 import time
 import re
 import difflib
+import socket
 from duckduckgo_search import DDGS
 
 # ============================================================================
@@ -76,6 +78,8 @@ Do not reveal hidden reasoning or thinking text. Give only the final answer.
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")  # Upgraded to qwen3:8b for better performance and speed
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "15"))  # Increased from 4s to 15s for better responses
+FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
+FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
 
 # Weather API
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "").strip()
@@ -418,7 +422,13 @@ class UserSession(db.Model):
 def initialize_database():
     """Create database tables and add missing columns for older DB files."""
     with app.app_context():
-        db.create_all()
+        try:
+            db.create_all()
+        except OperationalError as error:
+            if "already exists" not in str(error).lower():
+                raise
+            db.session.rollback()
+            logger.warning("Database table already existed during startup; continuing.")
         inspector = inspect(db.engine)
 
         def add_missing_columns(table_name, migrations):
@@ -2279,6 +2289,16 @@ def warmup_ollama():
     return False
 
 
+def get_lan_ip():
+    """Best-effort local network IP for opening DENZ from a phone."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+    except Exception:
+        return "YOUR_COMPUTER_IP"
+
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -2304,15 +2324,18 @@ if __name__ == '__main__':
         except Exception as e:
             logger.error(f"❌ DB error: {e}")
     
-    # Warm up Ollama before starting the server
-    ollama_ready = warmup_ollama()
+    # Warm up Ollama in the background so web/mobile clients can connect immediately.
+    threading.Thread(target=warmup_ollama, daemon=True).start()
+    ollama_ready = True
     
     if ollama_ready:
         logger.info("✅ Ollama is ready for requests!")
     else:
         logger.warning("⚠️ Ollama warmup failed, but server starting anyway. Requests may fail initially.")
     
-    logger.info(f"🌐 Flask on http://localhost:5000")
+    lan_ip = get_lan_ip()
+    logger.info(f"🌐 Flask local:  http://localhost:{FLASK_PORT}")
+    logger.info(f"📱 Mobile/LAN:   http://{lan_ip}:{FLASK_PORT}")
     logger.info("="*70 + "\n")
     
-    app.run(debug=True, host='localhost', port=5000, use_reloader=False)
+    app.run(debug=True, host=FLASK_HOST, port=FLASK_PORT, use_reloader=False)
