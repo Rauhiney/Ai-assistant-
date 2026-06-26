@@ -35,6 +35,10 @@ const CONFIG_3D = {
     morphOverrideUntil: 0,
 };
 
+let CURRENT_BROWSER_LOCATION = null;
+let BROWSER_LOCATION_PROMISE = null;
+const LOCATION_STORAGE_KEY = 'denz_browser_location';
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -296,7 +300,7 @@ async function fetchAPI(endpoint, options = {}) {
             ...options,
         });
         
-        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+        if (!response.ok) throw new Error(`API Error: ${response.status} ${response.statusText}`);
         return await response.json();
     } catch (error) {
         console.error('API Error:', error);
@@ -1207,11 +1211,20 @@ function setupChatInterface() {
         
         // Get response
         try {
+            const messageLooksLocationAware = /\b(weather|temperature|forecast|rain|humidity|location|where am i|near me|map)\b/i.test(message);
+            const browserLocation = CURRENT_BROWSER_LOCATION
+                || loadCachedBrowserLocation()
+                || await detectBrowserLocation({
+                    timeout: messageLooksLocationAware ? 10000 : 5000,
+                    silent: !messageLooksLocationAware,
+                });
+
             const response = await fetchAPI('/api/chat', {
                 method: 'POST',
                 body: JSON.stringify({
                     message,
                     session_id: getSessionId(),
+                    location: browserLocation,
                 }),
             });
             
@@ -1227,7 +1240,7 @@ function setupChatInterface() {
                     trigger3DEffect(response['3d_effect']);
                 }
             } else {
-                addMessage('I could not reach the DENZ backend. On mobile, open the laptop LAN address shown in the server console and keep both devices on the same Wi-Fi.', 'bot');
+                addMessage('I could not reach the DENZ backend. Please check that the deployed backend is running and that /api/health works on this same website.', 'bot');
                 showToast('Backend connection failed', 'error', 4000);
             }
         } finally {
@@ -1318,6 +1331,108 @@ function updateGeolocationInterface(location, options = {}) {
     statusElement.textContent = options.status || (hasCoords ? 'Location locked on map' : 'Location unavailable');
 }
 
+function setCurrentBrowserLocation(location) {
+    if (!location || !location.coords) return;
+
+    const lat = Number(location.coords.lat);
+    const lng = Number(location.coords.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
+
+    CURRENT_BROWSER_LOCATION = {
+        ...location,
+        coords: { lat, lng },
+        capturedAt: Date.now(),
+    };
+
+    try {
+        localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(CURRENT_BROWSER_LOCATION));
+    } catch (error) {
+        console.warn('Could not cache browser location:', error);
+    }
+}
+
+function loadCachedBrowserLocation() {
+    if (CURRENT_BROWSER_LOCATION) return CURRENT_BROWSER_LOCATION;
+
+    try {
+        const cached = JSON.parse(localStorage.getItem(LOCATION_STORAGE_KEY) || 'null');
+        if (!cached || !cached.capturedAt) return null;
+        if (Date.now() - cached.capturedAt > 10 * 60 * 1000) return null;
+        setCurrentBrowserLocation(cached);
+        return CURRENT_BROWSER_LOCATION;
+    } catch (error) {
+        return null;
+    }
+}
+
+async function detectBrowserLocation(options = {}) {
+    if (CURRENT_BROWSER_LOCATION || loadCachedBrowserLocation()) return CURRENT_BROWSER_LOCATION;
+    if (BROWSER_LOCATION_PROMISE) return BROWSER_LOCATION_PROMISE;
+
+    BROWSER_LOCATION_PROMISE = new Promise((resolve) => {
+        if (!window.isSecureContext && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+            updateGeolocationInterface(null, {
+                status: 'Location needs HTTPS on mobile browsers',
+            });
+            resolve(null);
+            return;
+        }
+
+        if (!navigator.geolocation) {
+            updateGeolocationInterface(null, {
+                status: 'Browser location is not supported',
+            });
+            resolve(null);
+            return;
+        }
+
+        updateGeolocationInterface(null, {
+            status: options.silent ? 'Checking location' : 'Requesting browser location',
+        });
+
+        navigator.geolocation.getCurrentPosition(
+            async (position) => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                const resolvedPlace = await resolveLocationNameFromCoords(lat, lng);
+                const location = {
+                    city: resolvedPlace?.city || 'Current location',
+                    country: resolvedPlace?.country || 'Local device',
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                    coords: { lat, lng },
+                };
+
+                updateMiniMap(location);
+                setCurrentBrowserLocation(location);
+                updateGeolocationInterface(location, {
+                    status: resolvedPlace
+                        ? `Location resolved, accuracy about ${Math.round(position.coords.accuracy)} m`
+                        : `Coordinates active, accuracy about ${Math.round(position.coords.accuracy)} m`,
+                });
+                resolve(CURRENT_BROWSER_LOCATION);
+            },
+            (error) => {
+                console.warn('Location permission unavailable:', error.message);
+                updateGeolocationInterface(null, {
+                    status: error.code === 1
+                        ? 'Location permission denied in browser settings'
+                        : 'Browser location unavailable, trying network location',
+                });
+                resolve(null);
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: options.timeout || 10000,
+                maximumAge: 300000,
+            }
+        );
+    }).finally(() => {
+        BROWSER_LOCATION_PROMISE = null;
+    });
+
+    return BROWSER_LOCATION_PROMISE;
+}
+
 async function fetchServerLocationForMap(statusPrefix = 'Using network location') {
     const data = await fetchAPI('/api/location');
     if (!data || !data.success || !data.location) return false;
@@ -1333,6 +1448,7 @@ async function fetchServerLocationForMap(statusPrefix = 'Using network location'
     };
 
     updateMiniMap(location);
+    setCurrentBrowserLocation(location);
     updateGeolocationInterface(location, {
         status: `${statusPrefix}${location.timezone ? ` (${location.timezone})` : ''}`,
     });
@@ -1381,56 +1497,9 @@ async function initCurrentLocationMap() {
         refreshBtn.disabled = isLoading;
     };
 
-    const requestBrowserLocation = () => new Promise((resolve) => {
-        if (!navigator.geolocation) {
-            resolve(false);
-            return;
-        }
-
-        updateGeolocationInterface(null, {
-            status: 'Requesting browser location',
-        });
-
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                const lat = position.coords.latitude;
-                const lng = position.coords.longitude;
-                const resolvedPlace = await resolveLocationNameFromCoords(lat, lng);
-                const location = {
-                    city: resolvedPlace?.city || 'Current location',
-                    country: resolvedPlace?.country || 'Local device',
-                    coords: {
-                        lat,
-                        lng,
-                    },
-                };
-
-                updateMiniMap(location);
-                updateGeolocationInterface(location, {
-                    status: resolvedPlace
-                        ? `Location resolved, accuracy about ${Math.round(position.coords.accuracy)} m`
-                        : `Coordinates active, accuracy about ${Math.round(position.coords.accuracy)} m`,
-                });
-                resolve(true);
-            },
-            (error) => {
-                console.warn('Location permission unavailable:', error.message);
-                updateGeolocationInterface(null, {
-                    status: 'Browser location unavailable, trying network location',
-                });
-                resolve(false);
-            },
-            {
-                enableHighAccuracy: false,
-                timeout: 3000,
-                maximumAge: 300000,
-            }
-        );
-    });
-
     const refreshLocation = async () => {
         setLoading(true);
-        const hasBrowserLocation = await requestBrowserLocation();
+        const hasBrowserLocation = await detectBrowserLocation({ timeout: 10000 });
         if (!hasBrowserLocation) {
             await fetchServerLocationForMap();
         }

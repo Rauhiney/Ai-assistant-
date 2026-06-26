@@ -79,7 +79,7 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")  # Upgraded to qwen3:8b for better performance and speed
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "15"))  # Increased from 4s to 15s for better responses
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
-FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
+FLASK_PORT = int(os.getenv("PORT", os.getenv("FLASK_PORT", "5000")))
 
 # Weather API
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "").strip()
@@ -98,6 +98,8 @@ weather_cache = {}
 response_cache = {}
 pending_weather_requests = {}
 conversation_memory = {}
+geolocation_backoff_until = {}
+GEOLOCATION_RATE_LIMIT_BACKOFF_SECONDS = 15 * 60
 
 WEATHER_KEYWORDS = [
     "weather",
@@ -482,7 +484,7 @@ def get_location_from_ip(ip_address, allow_network=True):
     """Get location with in-memory cache and fallback"""
     if ip_address in ("127.0.0.1", "::1", "localhost") or ip_address.startswith("192.168.") or ip_address.startswith("10."):
         logger.info(f"Local/private IP detected ({ip_address}), using neutral location")
-        return get_fallback_location()
+        return get_fallback_location(ip_address)
 
     # Check in-memory cache first
     cached = cached_location(ip_address)
@@ -510,7 +512,12 @@ def get_location_from_ip(ip_address, allow_network=True):
         return location_info
 
     if not allow_network:
-        return get_fallback_location()
+        return get_fallback_location(ip_address)
+
+    backoff_until = geolocation_backoff_until.get(ip_address, 0)
+    if time.time() < backoff_until:
+        logger.info(f"IP geolocation temporarily rate-limited for {ip_address}, using fallback")
+        return get_fallback_location(ip_address)
     
     # Fetch from API with fallback
     try:
@@ -572,21 +579,28 @@ def get_location_from_ip(ip_address, allow_network=True):
                 return location_info
             else:
                 logger.warning("⚠️ Invalid location data, using fallback")
-                return get_fallback_location()
+                return get_fallback_location(ip_address)
         
         else:
-            logger.warning(f"⚠️ IP geolocation failed with status {response.status_code}, using fallback")
-            return get_fallback_location()
+            if response.status_code == 429:
+                geolocation_backoff_until[ip_address] = time.time() + GEOLOCATION_RATE_LIMIT_BACKOFF_SECONDS
+                logger.warning(
+                    f"IP geolocation rate limited for {ip_address}; "
+                    f"using fallback for {GEOLOCATION_RATE_LIMIT_BACKOFF_SECONDS // 60} minutes"
+                )
+            else:
+                logger.warning(f"⚠️ IP geolocation failed with status {response.status_code}, using fallback")
+            return get_fallback_location(ip_address)
     
     except Exception as e:
         logger.error(f"❌ Location error: {e}, using fallback")
-        return get_fallback_location()
+        return get_fallback_location(ip_address)
 
 
-def get_fallback_location():
+def get_fallback_location(ip_address='unknown'):
     """Neutral fallback for when location lookup is unavailable."""
     return {
-        'ip': 'unknown',
+        'ip': ip_address or 'unknown',
         'country': 'Unknown',
         'country_code': '',
         'city': 'Unknown',
@@ -601,6 +615,45 @@ def get_fallback_location():
 
 def has_real_location(location_data):
     return bool(location_data and location_data.get('city') not in (None, '', 'Unknown'))
+
+
+def is_valid_coordinate_pair(latitude, longitude):
+    try:
+        lat = float(latitude)
+        lng = float(longitude)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(lat) and math.isfinite(lng) and (lat != 0 or lng != 0)
+
+
+def get_location_from_request_payload(data):
+    """Use browser-provided geolocation when the frontend has permission."""
+    payload = (data or {}).get('location') or {}
+    coords = payload.get('coords') or {}
+
+    try:
+        latitude = float(coords.get('lat'))
+        longitude = float(coords.get('lng'))
+    except (TypeError, ValueError):
+        return None
+
+    if not is_valid_coordinate_pair(latitude, longitude):
+        return None
+
+    return {
+        'ip': 'browser',
+        'country': payload.get('country') or 'Current location',
+        'country_code': '',
+        'city': payload.get('city') or 'Current location',
+        'region': payload.get('region') or '',
+        'latitude': latitude,
+        'longitude': longitude,
+        'timezone': payload.get('timezone') or 'UTC',
+        'isp': 'Browser geolocation',
+        'postal': '',
+        'source': 'browser',
+    }
+
 
 def get_timezone_from_coords(latitude, longitude):
     """Get timezone (cached)"""
@@ -632,6 +685,10 @@ def get_weather_data(latitude, longitude, location_name="Unknown"):
     """Get weather with in-memory cache"""
     if not WEATHER_API_KEY or WEATHER_API_KEY == "PASTE_YOUR_NEW_OPENWEATHER_KEY_HERE":
         logger.warning("Weather API key is not configured")
+        return get_neutral_weather()
+
+    if not is_valid_coordinate_pair(latitude, longitude) or str(location_name).lower() in {'unknown', 'unknown, unknown'}:
+        logger.info("Skipping weather lookup for unknown location")
         return get_neutral_weather()
 
     location_key = f"{location_name}_{latitude}_{longitude}"
@@ -1815,7 +1872,10 @@ def api_chat():
         chat_history = get_recent_chat_history(session_id)
         
         # ===== LOCATION CONTEXT =====
-        location_data = get_location_from_ip(user_ip, allow_network=True) or {
+        location_data = get_location_from_request_payload(data)
+        if not location_data:
+            location_data = get_location_from_ip(user_ip, allow_network=True)
+        location_data = location_data or {
             'city': 'Unknown', 'country': 'Unknown', 'latitude': 0, 'longitude': 0, 'timezone': 'UTC'
         }
         

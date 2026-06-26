@@ -34,6 +34,15 @@ class WeatherFollowUpTest(unittest.TestCase):
             )
             return response.get_json()
 
+    def post_with_location(self, message, location, session_id="s1"):
+        with denz.app.test_client() as client:
+            response = client.post(
+                "/api/chat",
+                json={"message": message, "session_id": session_id, "location": location},
+                headers={"X-Forwarded-For": "8.8.8.8"},
+            )
+            return response.get_json()
+
     def test_weather_follow_up_reconnects_after_async_save_delay(self):
         fallback_location = {
             "city": "Unknown",
@@ -181,6 +190,46 @@ class WeatherFollowUpTest(unittest.TestCase):
         self.assertEqual(reply["web_search"]["results_count"], 1)
         search_mock.assert_called_once()
         self.assertEqual(ollama_mock.call_args.args[6], search_results)
+
+    def test_ip_geolocation_429_enters_backoff(self):
+        class RateLimitedResponse:
+            status_code = 429
+
+        with denz.app.app_context(), \
+             patch("denz.requests.get", return_value=RateLimitedResponse()) as request_mock:
+            first = denz.get_location_from_ip("8.8.8.8")
+            second = denz.get_location_from_ip("8.8.8.8")
+
+        self.assertEqual(first["city"], "Unknown")
+        self.assertEqual(second["city"], "Unknown")
+        self.assertIn("8.8.8.8", denz.geolocation_backoff_until)
+        request_mock.assert_called_once()
+
+    def test_chat_uses_browser_location_before_ip_lookup(self):
+        browser_location = {
+            "city": "Dharamsala",
+            "country": "India",
+            "timezone": "Asia/Kolkata",
+            "coords": {"lat": 32.219, "lng": 76.323},
+        }
+        weather_payload = {
+            "location": "Dharamsala, India",
+            "temperature": 18,
+            "feels_like": 17,
+            "humidity": 55,
+            "description": "clear sky",
+            "wind_speed": 3,
+            "clouds": 10,
+        }
+
+        with patch("denz.get_location_from_ip") as ip_lookup_mock, \
+             patch("denz.get_weather_data", return_value=weather_payload) as weather_mock:
+            reply = self.post_with_location("weather", browser_location, session_id="browser-location")
+
+        self.assertIn("Dharamsala", reply["reply"])
+        ip_lookup_mock.assert_not_called()
+        weather_mock.assert_called_once()
+        self.assertEqual(reply["location"]["city"], "Dharamsala")
 
 
 if __name__ == "__main__":
