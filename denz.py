@@ -100,7 +100,9 @@ response_cache = {}
 pending_weather_requests = {}
 conversation_memory = {}
 geolocation_backoff_until = {}
+ollama_backoff_until = 0
 GEOLOCATION_RATE_LIMIT_BACKOFF_SECONDS = 15 * 60
+OLLAMA_FAILURE_BACKOFF_SECONDS = 60
 
 WEATHER_KEYWORDS = [
     "weather",
@@ -126,6 +128,11 @@ WEATHER_FILLER_WORDS = (
     'forecast', 'rain', 'humidity', 'climate', 'in', 'at', 'for', 'of',
     's', 'hat', 'todays',
 )
+FOLLOWUP_REFERENCE_TERMS = {
+    'next', 'more', 'again', 'same', 'continue', 'go on', 'what about it',
+    'what about that', 'that', 'this', 'it', 'also', 'and', 'explain more',
+    'tell me more',
+}
 LOCATION_ALIASES = {
     'dharamshala': 'Dharamsala',
     'dharamshal': 'Dharamsala',
@@ -221,10 +228,12 @@ def is_short_followup(message, context):
         return False
     if is_capital_query(text):
         return False
-    if text in {'next', 'more', 'again', 'same', 'what about it', 'what about', 'that', 'this', 'it', 'also', 'and'}:
+    if text in FOLLOWUP_REFERENCE_TERMS:
         return True
-    if len(text.split()) <= 3 and not any(word in text for word in WEATHER_KEYWORDS + ['news', 'what', 'why', 'how', 'who', 'where', 'when', 'which', 'is', 'are', 'can', 'could', 'should', 'do', 'does']):
+
+    if re.match(r'^(what about|how about|and)\s+[a-z0-9][a-z0-9\s-]{1,60}$', text):
         return True
+
     return False
 
 
@@ -262,9 +271,15 @@ def resolve_followup_message(message, session_id):
         else:
             target = normalize_entity_from_text(normalized) or last_entity or last_topic or normalized
         return f'weather in {target}'
-    if normalized in {'next', 'more', 'again', 'what about it', 'that', 'this', 'it'}:
+    if normalized in {'next', 'more', 'again', 'what about it', 'what about that', 'that', 'this', 'it', 'continue', 'go on', 'explain more', 'tell me more'}:
         target = last_entity or last_topic or 'the previous topic'
         return f'Tell me more about {target}'
+    what_about_match = re.match(r'^(?:what about|how about|and)\s+(.+)$', normalized)
+    if what_about_match:
+        target = what_about_match.group(1).strip()
+        if last_entity or last_topic:
+            return f'Tell me about {target} in the context of {last_entity or last_topic}'
+        return f'Tell me about {target}'
     if last_entity or last_topic:
         return f'Tell me about {normalized} in the context of {last_entity or last_topic}'
     return message
@@ -275,9 +290,10 @@ def update_conversation_memory(session_id, user_message, ai_response, effective_
     intent = infer_user_intent(effective_message)
     entity = requested_weather_location or extract_weather_location(effective_message) or guess_weather_location(effective_message) or normalize_entity_from_text(effective_message)
     topic = entity or normalize_entity_from_text(user_message)
-    if not entity:
+    is_followup = is_short_followup(user_message, context)
+    if not entity and is_followup:
         entity = context.get('last_entity')
-    if not topic:
+    if not topic and is_followup:
         topic = context.get('last_topic')
     context.update({
         'last_intent': intent,
@@ -1075,19 +1091,7 @@ def generate_search_fallback_response(user_message, web_search_results=None):
     if not results:
         return None
 
-    lines = ["I could not reach the local AI model, but I found this from web results:"]
-    for result in results[:3]:
-        title = result.get('title') or 'Result'
-        body = result.get('body') or ''
-        href = result.get('href') or ''
-        line = f"- {title}"
-        if body:
-            line += f": {body}"
-        if href and href != 'N/A':
-            line += f" ({href})"
-        lines.append(line)
-
-    return "\n".join(lines)
+    return summarize_search_results(results, user_message)
 
 
 def extract_knowledge_topic(message):
@@ -1186,6 +1190,145 @@ def get_basic_knowledge_response(topic):
         'denz': 'DENZ is your 3D AI assistant project. It combines a Flask backend, chat, weather, maps, and an interactive 3D frontend.',
     }
     return basics.get(topic_key)
+
+
+def safe_eval_math_expression(expression):
+    """Evaluate simple arithmetic without executing arbitrary code."""
+    import ast
+    import operator
+
+    operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def evaluate(node):
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in operators:
+            left = evaluate(node.left)
+            right = evaluate(node.right)
+            if isinstance(node.op, ast.Pow) and abs(right) > 10:
+                raise ValueError("Exponent too large")
+            return operators[type(node.op)](left, right)
+        if isinstance(node, ast.UnaryOp) and type(node.op) in operators:
+            return operators[type(node.op)](evaluate(node.operand))
+        raise ValueError("Unsupported expression")
+
+    if not expression or not re.fullmatch(r'[\d\s+\-*/().%^]+', expression):
+        return None
+
+    normalized = expression.replace('^', '**')
+    try:
+        return evaluate(ast.parse(normalized, mode='eval'))
+    except Exception:
+        return None
+
+
+def extract_math_expression(message):
+    """Find a simple arithmetic expression inside a user question."""
+    normalized = message.lower()
+    normalized = normalized.replace('plus', '+').replace('minus', '-')
+    normalized = normalized.replace('times', '*').replace('multiplied by', '*')
+    normalized = normalized.replace('divided by', '/').replace('over', '/')
+    match = re.search(r'[-+*/().\d\s^%]{3,}', normalized)
+    if not match:
+        return None
+    expression = match.group(0).strip()
+    if not re.search(r'\d', expression) or not re.search(r'[+\-*/^%]', expression):
+        return None
+    return expression
+
+
+def generate_math_fallback_response(message):
+    expression = extract_math_expression(message)
+    result = safe_eval_math_expression(expression) if expression else None
+    if result is None:
+        return None
+    if isinstance(result, float) and result.is_integer():
+        result = int(result)
+    return f"The answer is {result}.\n\nCalculation: {expression} = {result}"
+
+
+def summarize_search_results(results, original_query):
+    """Turn search snippets into a cleaner assistant-style answer."""
+    if not results:
+        return None
+
+    lines = [f"Here is the best answer I can build from current web results for '{original_query}':"]
+    for result in results[:3]:
+        title = result.get('title') or 'Result'
+        body = (result.get('body') or '').strip()
+        href = result.get('href') or ''
+        if not body:
+            continue
+        lines.append(f"- {title}: {body}")
+        if href and href != 'N/A':
+            lines.append(f"  Source: {href}")
+
+    if len(lines) == 1:
+        return None
+    return "\n".join(lines)
+
+
+def generate_structured_fallback_response(user_message):
+    """Produce a useful answer shape for complex prompts without pretending to know facts."""
+    msg = normalize_conversation_text(user_message)
+    topic = extract_knowledge_topic(user_message)
+
+    if any(phrase in msg for phrase in ('write code', 'give code', 'create code', 'python code', 'javascript code', 'html code', 'css code')):
+        return (
+            "I can help with code, but I need the exact task and language to avoid giving you the wrong solution.\n\n"
+            "Send it like this:\n"
+            "- Language/framework\n"
+            "- What input you have\n"
+            "- What output you want\n"
+            "- Any error message or current code\n\n"
+            "Then I will give you a complete, runnable answer."
+        )
+
+    if msg.startswith('how ') or ' how to ' in msg or msg.startswith('how do '):
+        subject = topic or user_message.strip(" .?!")
+        return (
+            f"Here is a practical way to approach {subject}:\n\n"
+            "1. Define the exact goal and inputs.\n"
+            "2. Break the problem into smaller steps.\n"
+            "3. Solve the easiest step first and verify it works.\n"
+            "4. Add the next step only after the previous one is correct.\n"
+            "5. Test the final result with normal cases and edge cases.\n\n"
+            "Send the specific problem details and I will solve it step by step."
+        )
+
+    if any(word in msg for word in ('difference between', 'compare', 'vs', 'versus')):
+        return (
+            "I can compare them, but I need the two exact things you want compared. "
+            "Ask like: 'compare Flask and Django' or 'difference between AI and machine learning', "
+            "and I will give you a clear table with use cases and recommendation."
+        )
+
+    if msg.startswith('why '):
+        return (
+            "A good way to answer a 'why' question is to identify the cause, the mechanism, and the result. "
+            "Please include the exact topic or situation, and I will explain it clearly with examples."
+        )
+
+    if is_complex_question(user_message):
+        return (
+            "I can help with complex problems, but I need the full problem statement to solve it correctly. "
+            "Please send the exact question, any data/code/error, and what answer format you need. "
+            "I will then work through it step by step."
+        )
+
+    return None
 
 
 def generate_knowledge_fallback_response(user_message):
@@ -1492,8 +1635,8 @@ def get_pending_weather_question_by_ip(user_ip, limit=12):
     )
 
     for message in recent_messages:
-        if is_pending_weather_message(message):
-            return message.user_message
+        if is_weather_question(message.user_message):
+            return message.user_message if is_pending_weather_message(message) else None
 
     return None
 
@@ -1557,6 +1700,13 @@ def build_ultra_fast_prompt(user_message, location_data, weather_data, local_tim
 
 RESPONSE STYLE:
 {length_guidance}
+
+CRITICAL BEHAVIOR:
+- Answer the latest user message first.
+- Use previous conversation only when the latest message is clearly a follow-up such as "more", "again", "that", or "what about it".
+- If the latest message changes topic, ignore stale weather/location/topic context.
+- For complex problems, solve step by step and give the final answer clearly.
+- If required details are missing, ask one specific clarifying question instead of guessing.
 
 {history_section}{context_section}{search_context}User: {user_message}
 /no_think
@@ -1634,9 +1784,22 @@ def clean_ollama_response(response_text):
     return cleaned.strip()
 
 
+def is_ollama_in_backoff():
+    return time.time() < ollama_backoff_until
+
+
+def mark_ollama_unavailable():
+    global ollama_backoff_until
+    ollama_backoff_until = time.time() + OLLAMA_FAILURE_BACKOFF_SECONDS
+
+
 def get_ollama_response_ultra_fast(user_message, location_data, weather_data, local_time, chat_history=None, session_id=None, web_search_results=None):
     """Ollama response with retry mechanism and better error handling"""
     chat_history = chat_history or []
+
+    if is_ollama_in_backoff():
+        logger.warning("Ollama is in temporary backoff; using fallback response")
+        return generate_smart_fallback(user_message, location_data, weather_data, local_time, web_search_results)
 
     # Check response cache
     history_key = "|".join(f"{item.user_message}:{item.bot_response}" for item in chat_history[-3:])
@@ -1716,6 +1879,7 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
         except requests.exceptions.Timeout as e:
             logger.warning(f"⏱️ Timeout on attempt {attempt + 1}/{max_retries}")
             last_error = str(e)
+            mark_ollama_unavailable()
             if attempt < max_retries - 1:
                 import time
                 time.sleep(1)  # Wait before retry
@@ -1723,6 +1887,7 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
         except requests.exceptions.ConnectionError as e:
             logger.warning(f"🔌 Connection error on attempt {attempt + 1}/{max_retries}: {e}")
             last_error = str(e)
+            mark_ollama_unavailable()
             if attempt < max_retries - 1:
                 import time
                 time.sleep(1)
@@ -1742,6 +1907,10 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
 def generate_smart_fallback(user_message, location_data, weather_data, local_time, web_search_results=None):
     """Generate intelligent fallback responses when Ollama fails, instead of generic responses."""
     msg = user_message.lower()
+    math_fallback = generate_math_fallback_response(user_message)
+    if math_fallback:
+        return math_fallback
+
     search_fallback = generate_search_fallback_response(user_message, web_search_results)
     if search_fallback:
         return search_fallback
@@ -1749,6 +1918,10 @@ def generate_smart_fallback(user_message, location_data, weather_data, local_tim
     knowledge_fallback = generate_knowledge_fallback_response(user_message)
     if knowledge_fallback:
         return knowledge_fallback
+
+    structured_fallback = generate_structured_fallback_response(user_message)
+    if structured_fallback:
+        return structured_fallback
     
     # Location/Place questions
     if any(word in msg for word in ['where', 'location', 'city', 'state', 'country', 'lies', 'situated', 'located', 'capital']):

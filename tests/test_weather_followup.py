@@ -239,6 +239,45 @@ class WeatherFollowUpTest(unittest.TestCase):
         self.assertIn("high-level programming language", reply)
         self.assertNotIn("local AI model", reply)
 
+    def test_unrelated_short_topic_is_not_rewritten_as_followup(self):
+        context = denz.get_session_context("topic-reset")
+        context.update({
+            "last_intent": "weather",
+            "last_entity": "Dharamsala",
+            "last_topic": "Dharamsala",
+        })
+
+        self.assertEqual(denz.resolve_followup_message("python", "topic-reset"), "python")
+        self.assertEqual(
+            denz.resolve_followup_message("what about tomorrow", "topic-reset"),
+            "weather in Tomorrow",
+        )
+
+    def test_ollama_failure_solves_simple_math(self):
+        reply = denz.generate_smart_fallback(
+            "solve 12 * (3 + 2)",
+            {},
+            denz.get_neutral_weather(),
+            "12:00",
+        )
+
+        self.assertIn("60", reply)
+        self.assertIn("Calculation", reply)
+
+    def test_complex_fallback_asks_for_specific_problem_details(self):
+        with patch("denz.perform_web_search", return_value=[]), \
+             patch("denz.fetch_wikipedia_summary", return_value=None):
+            reply = denz.generate_smart_fallback(
+                "how do I solve a complex coding problem",
+                {},
+                denz.get_neutral_weather(),
+                "12:00",
+            )
+
+        self.assertIn("step", reply.lower())
+        self.assertIn("specific problem", reply.lower())
+        self.assertNotIn("local AI model", reply)
+
     def test_ip_geolocation_429_enters_backoff(self):
         class RateLimitedResponse:
             status_code = 429
