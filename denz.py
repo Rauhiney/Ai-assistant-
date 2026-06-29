@@ -1051,6 +1051,44 @@ def format_web_search_response(results, original_query):
     return response.strip()
 
 
+def should_try_search_fallback(message):
+    """Use web snippets when the local model is unavailable for factual questions."""
+    msg = message.lower()
+    if is_weather_question(msg) or is_capital_query(msg):
+        return False
+
+    factual_markers = (
+        'what', 'who', 'where', 'when', 'why', 'how', 'define', 'meaning',
+        'explain', 'tell me about', 'information about', 'details about',
+        'latest', 'current', 'news', 'search', 'find',
+    )
+    return any(marker in msg for marker in factual_markers)
+
+
+def generate_search_fallback_response(user_message, web_search_results=None):
+    """Return a useful answer when Ollama is unavailable on a deployed server."""
+    results = web_search_results
+    if results is None and should_try_search_fallback(user_message):
+        results = perform_web_search(user_message, max_results=3)
+
+    if not results:
+        return None
+
+    lines = ["I could not reach the local AI model, but I found this from web results:"]
+    for result in results[:3]:
+        title = result.get('title') or 'Result'
+        body = result.get('body') or ''
+        href = result.get('href') or ''
+        line = f"- {title}"
+        if body:
+            line += f": {body}"
+        if href and href != 'N/A':
+            line += f" ({href})"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
 # ============================================================================
 # AGENT/ROUTER SYSTEM
 # ============================================================================
@@ -1582,12 +1620,15 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
                 continue
     
     logger.error(f"❌ Ollama failed after {max_retries} attempts: {last_error}")
-    return generate_smart_fallback(user_message, location_data, weather_data, local_time)
+    return generate_smart_fallback(user_message, location_data, weather_data, local_time, web_search_results)
 
 
-def generate_smart_fallback(user_message, location_data, weather_data, local_time):
+def generate_smart_fallback(user_message, location_data, weather_data, local_time, web_search_results=None):
     """Generate intelligent fallback responses when Ollama fails, instead of generic responses."""
     msg = user_message.lower()
+    search_fallback = generate_search_fallback_response(user_message, web_search_results)
+    if search_fallback:
+        return search_fallback
     
     # Location/Place questions
     if any(word in msg for word in ['where', 'location', 'city', 'state', 'country', 'lies', 'situated', 'located', 'capital']):
@@ -1615,16 +1656,16 @@ def generate_smart_fallback(user_message, location_data, weather_data, local_tim
         # Extract what they're asking about
         question_about = msg.replace('what is', '').replace('what are', '').replace('who is', '').replace('define', '').replace('meaning of', '').replace('explain', '').strip()
         if question_about:
-            return f"I'm currently unable to access my knowledge base to answer your question about '{question_about}'. Please try again in a moment and I'll provide a detailed answer."
-        return "I'm experiencing technical difficulties retrieving information. Please try rephrasing your question and ask again."
+            return f"I could not reach the local AI model right now, so I cannot give a full generated answer about '{question_about}'. Please try again in a moment."
+        return "I could not reach the local AI model right now. Please try rephrasing your question, or ask something that can use weather, maps, or web search."
     
     # How/Why questions
     if any(word in msg for word in ['how', 'why', 'describe', 'tell me', 'explain']):
-        return "I'm temporarily unable to process that question due to a technical issue. Please rephrase and try again - I'm here to help!"
+        return "I could not reach the local AI model right now, so I cannot fully process that question. Please try again in a moment."
     
     # Acknowledgment that we got their question but have issues
     if user_message.strip():
-        return f"I received your question about '{user_message[:50]}...' but I'm experiencing temporary difficulties processing it. Please try again in a moment."
+        return f"I received your question about '{user_message[:50]}...' but I could not reach the local AI model right now. Please try again in a moment."
     
     # Absolute fallback
     return "I'm currently having technical difficulties. Please try your question again in a moment!"

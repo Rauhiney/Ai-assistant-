@@ -191,6 +191,28 @@ class WeatherFollowUpTest(unittest.TestCase):
         search_mock.assert_called_once()
         self.assertEqual(ollama_mock.call_args.args[6], search_results)
 
+    def test_ollama_failure_uses_search_fallback_for_general_questions(self):
+        search_results = [
+            {
+                "rank": 1,
+                "title": "Python",
+                "body": "Python is a programming language.",
+                "href": "https://example.com/python",
+            }
+        ]
+
+        with patch("denz.perform_web_search", return_value=search_results) as search_mock:
+            reply = denz.generate_smart_fallback(
+                "what is python",
+                {},
+                denz.get_neutral_weather(),
+                "12:00",
+            )
+
+        self.assertIn("web results", reply)
+        self.assertIn("Python is a programming language.", reply)
+        search_mock.assert_called_once_with("what is python", max_results=3)
+
     def test_ip_geolocation_429_enters_backoff(self):
         class RateLimitedResponse:
             status_code = 429
