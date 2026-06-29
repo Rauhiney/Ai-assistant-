@@ -15,6 +15,7 @@ import time
 import re
 import difflib
 import socket
+from urllib.parse import quote
 from duckduckgo_search import DDGS
 
 # ============================================================================
@@ -1014,7 +1015,7 @@ def perform_web_search(query, max_results=5):
     try:
         logger.info(f"🔍 Performing web search for: {query}")
         
-        ddgs = DDGS()
+        ddgs = DDGS(timeout=4)
         results = list(ddgs.text(query, max_results=max_results))
         
         if results:
@@ -1087,6 +1088,121 @@ def generate_search_fallback_response(user_message, web_search_results=None):
         lines.append(line)
 
     return "\n".join(lines)
+
+
+def extract_knowledge_topic(message):
+    """Pull a likely encyclopedia topic from a short factual question."""
+    msg = re.sub(r'\s+', ' ', message.lower()).strip(" .?!")
+    replacements = (
+        'what is ', 'what are ', 'who is ', 'who are ', 'where is ',
+        'define ', 'meaning of ', 'explain ', 'tell me about ',
+        'information about ', 'details about ',
+    )
+    for prefix in replacements:
+        if msg.startswith(prefix):
+            msg = msg[len(prefix):].strip(" .?!")
+            break
+
+    msg = re.sub(r'\b(please|pls|short answer|briefly)\b', '', msg)
+    msg = re.sub(r'\s+', ' ', msg).strip(" .?!")
+    if not msg or len(msg) > 80:
+        return None
+
+    words = msg.split()
+    if len(words) > 8:
+        return None
+
+    return msg
+
+
+def fetch_wikipedia_summary(topic):
+    """Fetch a concise encyclopedia summary without requiring an API key."""
+    if not topic:
+        return None
+
+    headers = {'User-Agent': 'DENZ assistant educational fallback/1.0'}
+    try:
+        search_response = requests.get(
+            'https://en.wikipedia.org/w/api.php',
+            params={
+                'action': 'query',
+                'list': 'search',
+                'srsearch': topic,
+                'format': 'json',
+                'srlimit': 1,
+            },
+            headers=headers,
+            timeout=4,
+        )
+        search_response.raise_for_status()
+        search_results = search_response.json().get('query', {}).get('search', [])
+        if not search_results:
+            return None
+
+        title = search_results[0].get('title')
+        if not title:
+            return None
+
+        summary_response = requests.get(
+            f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(title.replace(' ', '_'))}",
+            headers=headers,
+            timeout=4,
+        )
+        summary_response.raise_for_status()
+        summary_data = summary_response.json()
+        extract = summary_data.get('extract')
+        if not extract:
+            return None
+
+        page_url = (
+            summary_data.get('content_urls', {})
+            .get('desktop', {})
+            .get('page')
+        )
+        answer = f"{title}: {extract}"
+        if page_url:
+            answer += f"\nSource: {page_url}"
+        return answer
+    except Exception as e:
+        logger.warning(f"Wikipedia fallback failed for '{topic}': {e}")
+        return None
+
+
+def get_basic_knowledge_response(topic):
+    """Small no-network fallback for common demo and school questions."""
+    if not topic:
+        return None
+
+    topic_key = topic.lower().strip()
+    basics = {
+        'python': 'Python is a high-level programming language known for readable syntax. It is used for web development, automation, data science, AI, scripting, and many beginner programming courses.',
+        'artificial intelligence': 'Artificial intelligence is the field of building computer systems that can perform tasks usually associated with human intelligence, such as understanding language, recognizing patterns, making predictions, and solving problems.',
+        'ai': 'AI, or artificial intelligence, is technology that helps computers perform tasks such as understanding language, recognizing images, making predictions, and assisting with decisions.',
+        'machine learning': 'Machine learning is a branch of AI where systems learn patterns from data instead of being programmed with every rule by hand.',
+        'flask': 'Flask is a lightweight Python web framework used to build websites, APIs, and backend services.',
+        'html': 'HTML is the standard markup language used to structure content on web pages.',
+        'css': 'CSS is the language used to style web pages, including layout, colors, fonts, spacing, and responsive design.',
+        'javascript': 'JavaScript is a programming language used mainly to make websites interactive, and it can also run on servers through platforms like Node.js.',
+        'denz': 'DENZ is your 3D AI assistant project. It combines a Flask backend, chat, weather, maps, and an interactive 3D frontend.',
+    }
+    return basics.get(topic_key)
+
+
+def generate_knowledge_fallback_response(user_message):
+    """Answer factual questions when both Ollama and search are unavailable."""
+    topic = extract_knowledge_topic(user_message)
+    if not topic:
+        return None
+
+    wiki_summary = fetch_wikipedia_summary(topic)
+    if wiki_summary:
+        return wiki_summary
+
+    basic_response = get_basic_knowledge_response(topic)
+    if basic_response:
+        return basic_response
+
+    return None
 
 
 # ============================================================================
@@ -1629,6 +1745,10 @@ def generate_smart_fallback(user_message, location_data, weather_data, local_tim
     search_fallback = generate_search_fallback_response(user_message, web_search_results)
     if search_fallback:
         return search_fallback
+
+    knowledge_fallback = generate_knowledge_fallback_response(user_message)
+    if knowledge_fallback:
+        return knowledge_fallback
     
     # Location/Place questions
     if any(word in msg for word in ['where', 'location', 'city', 'state', 'country', 'lies', 'situated', 'located', 'capital']):
@@ -1656,16 +1776,16 @@ def generate_smart_fallback(user_message, location_data, weather_data, local_tim
         # Extract what they're asking about
         question_about = msg.replace('what is', '').replace('what are', '').replace('who is', '').replace('define', '').replace('meaning of', '').replace('explain', '').strip()
         if question_about:
-            return f"I could not reach the local AI model right now, so I cannot give a full generated answer about '{question_about}'. Please try again in a moment."
-        return "I could not reach the local AI model right now. Please try rephrasing your question, or ask something that can use weather, maps, or web search."
+            return f"I could not find enough reliable information about '{question_about}' right now. Try asking it in a simpler way, or include a few more details."
+        return "I could not find enough reliable information for that question right now. Try rephrasing it or asking for weather, maps, or a specific topic."
     
     # How/Why questions
     if any(word in msg for word in ['how', 'why', 'describe', 'tell me', 'explain']):
-        return "I could not reach the local AI model right now, so I cannot fully process that question. Please try again in a moment."
+        return "I could not find enough reliable information for that question right now. Try asking it in a simpler or more specific way."
     
     # Acknowledgment that we got their question but have issues
     if user_message.strip():
-        return f"I received your question about '{user_message[:50]}...' but I could not reach the local AI model right now. Please try again in a moment."
+        return f"I received your question about '{user_message[:50]}...' but I do not have enough information to answer it well right now. Please try asking with more detail."
     
     # Absolute fallback
     return "I'm currently having technical difficulties. Please try your question again in a moment!"

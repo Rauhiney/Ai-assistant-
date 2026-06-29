@@ -213,6 +213,32 @@ class WeatherFollowUpTest(unittest.TestCase):
         self.assertIn("Python is a programming language.", reply)
         search_mock.assert_called_once_with("what is python", max_results=3)
 
+    def test_ollama_failure_uses_wikipedia_after_search_failure(self):
+        with patch("denz.perform_web_search", return_value=[]), \
+             patch("denz.fetch_wikipedia_summary", return_value="Python: Python is a programming language.") as wiki_mock:
+            reply = denz.generate_smart_fallback(
+                "what is python",
+                {},
+                denz.get_neutral_weather(),
+                "12:00",
+            )
+
+        self.assertEqual(reply, "Python: Python is a programming language.")
+        wiki_mock.assert_called_once_with("python")
+
+    def test_ollama_failure_uses_basic_answer_without_network(self):
+        with patch("denz.perform_web_search", return_value=[]), \
+             patch("denz.fetch_wikipedia_summary", return_value=None):
+            reply = denz.generate_smart_fallback(
+                "what is python",
+                {},
+                denz.get_neutral_weather(),
+                "12:00",
+            )
+
+        self.assertIn("high-level programming language", reply)
+        self.assertNotIn("local AI model", reply)
+
     def test_ip_geolocation_429_enters_backoff(self):
         class RateLimitedResponse:
             status_code = 429
