@@ -1337,6 +1337,184 @@ body.light-mode .user-message .message-content {
 .typing-3d .dot:nth-child(2) { animation-delay: 0.2s; }
 .typing-3d .dot:nth-child(3) { animation-delay: 0.4s; }
 
+.auth-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--sp-xs);
+    margin-bottom: var(--sp-md);
+}
+
+.auth-tab {
+    min-height: 42px;
+    border: 1px solid var(--border-3d);
+    border-radius: var(--rad-sm);
+    background: rgba(139, 92, 246, 0.08);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.auth-tab.active {
+    border-color: var(--primary-3d);
+    background: rgba(139, 92, 246, 0.22);
+    color: var(--text-primary);
+}
+
+.auth-form {
+    display: grid;
+    gap: var(--sp-sm);
+}
+
+.auth-form input,
+.auth-form select {
+    width: 100%;
+    min-height: 46px;
+    border: 1px solid var(--border-3d);
+    border-radius: var(--rad-sm);
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+    padding: 0 var(--sp-sm);
+}
+
+.auth-form select option {
+    color: #101828;
+}
+
+.auth-submit {
+    width: 100%;
+    min-height: 46px;
+}
+
+.auth-submit:disabled {
+    cursor: wait;
+    opacity: 0.68;
+    transform: none;
+}
+
+.auth-link-btn {
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.auth-link-btn:hover {
+    color: var(--accent-3d);
+}
+
+.auth-status {
+    min-height: 1.25rem;
+    margin: 0;
+    color: var(--text-tertiary);
+    font-size: 0.86rem;
+    line-height: 1.35;
+}
+
+.auth-status.error {
+    color: #ff8aac;
+}
+
+.auth-status.success {
+    color: var(--accent-3d);
+}
+
+.admin-dashboard {
+    width: min(1180px, calc(100% - 2rem));
+    margin: 96px auto 40px;
+    position: relative;
+    z-index: 10;
+}
+
+.admin-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-md);
+    margin-bottom: var(--sp-md);
+}
+
+.admin-header h1,
+.admin-panel h2 {
+    margin: 0;
+    color: var(--text-primary);
+}
+
+.admin-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--sp-sm);
+    margin-bottom: var(--sp-md);
+}
+
+.admin-stat,
+.admin-panel {
+    border: 1px solid var(--border-3d);
+    border-radius: var(--rad-sm);
+    background: var(--card-bg-3d);
+    backdrop-filter: blur(10px);
+}
+
+.admin-stat {
+    padding: var(--sp-md);
+}
+
+.admin-stat span {
+    display: block;
+    color: var(--text-tertiary);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+}
+
+.admin-stat strong {
+    display: block;
+    margin-top: var(--sp-xs);
+    color: var(--accent-3d);
+    font-size: 1.8rem;
+}
+
+.admin-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-md);
+}
+
+.admin-panel {
+    min-width: 0;
+    padding: var(--sp-md);
+}
+
+.admin-panel-wide {
+    grid-column: 1 / -1;
+}
+
+.admin-list {
+    display: grid;
+    gap: var(--sp-xs);
+    margin-top: var(--sp-sm);
+}
+
+.admin-list-item {
+    display: grid;
+    gap: 0.2rem;
+    padding: var(--sp-sm);
+    border: 1px solid rgba(139, 92, 246, 0.16);
+    border-radius: var(--rad-sm);
+    background: rgba(10, 14, 39, 0.26);
+}
+
+.admin-list-item strong,
+.admin-list-item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-list-item span {
+    color: var(--text-secondary);
+    font-size: 0.86rem;
+}
+
 /* ============================================================================
    MODALS
    ============================================================================ */
@@ -1979,19 +2157,27 @@ body.light-mode .user-message .message-content {
         transition: 0.3s;
         padding: var(--sp-lg) 0;
         gap: var(--sp-md);
-         display:none;
+        display: flex;
     }
 
     .nav-menu.active {
         left: 0;
-         display:none;
+        display: flex;
     }
 
     .mini-map-card {
-        height: 700px;
-        min-height: 700px;
-        flex-basis: 180px;
-        
+        height: 260px;
+        min-height: 220px;
+        flex-basis: 220px;
+    }
+
+    .admin-stats,
+    .admin-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-dashboard {
+        margin-top: 82px;
     }
 
     .geolocation-interface {

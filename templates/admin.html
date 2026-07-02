@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DENZ Admin Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="admin-page">
+    <nav class="navbar navbar-chat">
+        <div class="navbar-container">
+            <div class="logo-section">
+                <a href="/chat">
+                    <h1 class="logo">
+                        <span class="logo-icon">DENZ</span>
+                    </h1>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item"><a href="/chat" class="nav-link">Chat</a></li>
+                <li class="nav-item"><a href="/admin" class="nav-link active">Admin</a></li>
+                <li class="nav-item"><a href="#" class="nav-link theme-toggle" id="theme-toggle">Dark</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="admin-dashboard">
+        <section class="admin-header">
+            <h1>Admin Dashboard</h1>
+            <button class="input-control-btn" id="admin-refresh" title="Refresh">
+                <i class="fas fa-rotate"></i>
+            </button>
+        </section>
+
+        <section class="admin-stats" id="admin-stats"></section>
+
+        <section class="admin-grid">
+            <div class="admin-panel">
+                <h2>Recent Users</h2>
+                <div id="admin-users" class="admin-list"></div>
+            </div>
+            <div class="admin-panel">
+                <h2>Recent Uploads</h2>
+                <div id="admin-uploads" class="admin-list"></div>
+            </div>
+            <div class="admin-panel admin-panel-wide">
+                <h2>Recent Messages</h2>
+                <div id="admin-messages" class="admin-list"></div>
+            </div>
+        </section>
+    </main>
+
+    <div class="toast-container-3d" id="toast-container-3d"></div>
+    <script src="/static/js/script.js"></script>
+</body>
+</html>

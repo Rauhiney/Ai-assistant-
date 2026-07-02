@@ -28,11 +28,13 @@
                 <li class="nav-item"><a href="/" class="nav-link">Experience</a></li>
                 <li class="nav-item"><a href="/chat" class="nav-link active">Chat</a></li>
                 <li class="nav-item"><a href="/about" class="nav-link">About</a></li>
+                <li class="nav-item"><a href="/admin" class="nav-link admin-nav-link" id="admin-nav-link" style="display: none;">Admin</a></li>
                 <li class="nav-item" style="display: flex; align-items: center; gap: 8px;">
                     <span id="ollama-status-indicator" class="ollama-indicator loading">
                         <span class="dot"></span> Warming up
                     </span>
                 </li>
+                <li class="nav-item"><a href="#" class="nav-link" id="auth-btn">Login</a></li>
                 <li class="nav-item"><a href="#" class="nav-link theme-toggle" id="theme-toggle">🌙</a></li>
             </ul>
             <div class="hamburger">
@@ -164,10 +166,18 @@
                     <button class="input-control-btn" id="voice-btn" title="Voice Input">
                         <i class="fas fa-microphone"></i>
                     </button>
+                    <button class="input-control-btn" id="file-upload-btn" title="Upload PDF or DOCX">
+                        <i class="fas fa-file-arrow-up"></i>
+                    </button>
+                    <button class="input-control-btn" id="image-upload-btn" title="Analyze Image">
+                        <i class="fas fa-image"></i>
+                    </button>
                     <button class="input-control-btn" id="settings-btn" title="Settings">
                         <i class="fas fa-cog"></i>
                     </button>
                 </div>
+                <input type="file" id="file-upload-input" accept=".pdf,.docx,.txt,.md" hidden>
+                <input type="file" id="image-upload-input" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
 
                 <div class="input-wrapper">
                     <input 
@@ -190,6 +200,39 @@
                         <span class="dot"></span>
                     </span>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth Modal -->
+    <div class="modal-3d" id="auth-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content-3d auth-modal-content">
+            <div class="modal-header-3d">
+                <h2 id="auth-modal-title">Login</h2>
+                <button class="modal-close" id="auth-modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body-3d">
+                <div class="auth-tabs">
+                    <button class="auth-tab active" id="login-tab" type="button">Login</button>
+                    <button class="auth-tab" id="register-tab" type="button">Register</button>
+                </div>
+                <form id="auth-form" class="auth-form" novalidate>
+                    <input type="text" id="auth-username" placeholder="Username" autocomplete="username">
+                    <input type="email" id="auth-email" placeholder="Enter your email" autocomplete="email" style="display: none;">
+                    <input type="tel" id="auth-phone" placeholder="Phone with country code, e.g. +919876543210" autocomplete="tel" style="display: none;">
+                    <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password">
+                    <select id="auth-otp-channel" aria-label="OTP delivery method" style="display: none;">
+                        <option value="email">OTP on Email</option>
+                    </select>
+                    <input type="text" id="auth-otp" placeholder="6-digit OTP" inputmode="numeric" autocomplete="one-time-code" maxlength="6" style="display: none;">
+                    <input type="password" id="auth-new-password" placeholder="New password (optional)" autocomplete="new-password" style="display: none;">
+                    <p class="auth-status" id="auth-status" aria-live="polite"></p>
+                    <button class="send-btn-3d auth-submit" type="submit">Continue</button>
+                    <button class="auth-link-btn" id="forgot-auth-btn" type="button">Forgot username or password?</button>
+                </form>
             </div>
         </div>
     </div>

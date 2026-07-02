@@ -65,7 +65,7 @@
                     Experience the future of AI interaction through immersive 3D visualization
                 </p>
                 <div class="cta-buttons">
-                    <a href="/chat" class="btn btn-primary">
+                    <a href="/chat" class="btn btn-primary" data-auth-trigger data-auth-redirect="/chat">
                         <span>Start 3D Chat</span>
                         <i class="fas fa-arrow-right"></i>
                     </a>
@@ -227,12 +227,47 @@
         <section class="cta-section-3d">
             <h2>Ready to Experience 3D AI?</h2>
             <p>Dive into an immersive 3D environment and interact with advanced AI</p>
-            <a href="/chat" class="btn btn-large">
+            <a href="/chat" class="btn btn-large" data-auth-trigger data-auth-redirect="/chat">
                 <span>Launch 3D Experience</span>
                 <i class="fas fa-rocket"></i>
             </a>
         </section>
     </main>
+
+    <!-- Auth Modal -->
+    <div class="modal-3d" id="auth-modal">
+        <div class="modal-overlay"></div>
+        <div class="modal-content-3d auth-modal-content">
+            <div class="modal-header-3d">
+                <h2 id="auth-modal-title">Login</h2>
+                <button class="modal-close" id="auth-modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body-3d">
+                <div class="auth-tabs">
+                    <button class="auth-tab active" id="login-tab" type="button">Login</button>
+                    <button class="auth-tab" id="register-tab" type="button">Register</button>
+                </div>
+                <form id="auth-form" class="auth-form" novalidate>
+                    <input type="text" id="auth-username" placeholder="Username" autocomplete="username">
+                    <input type="email" id="auth-email" placeholder="Enter your email" autocomplete="email" style="display: none;">
+                    <input type="tel" id="auth-phone" placeholder="Phone with country code, e.g. +919876543210" autocomplete="tel" style="display: none;">
+                    <input type="password" id="auth-password" placeholder="Password" autocomplete="current-password">
+                    <select id="auth-otp-channel" aria-label="OTP delivery method" style="display: none;">
+                        <option value="email">OTP on Email</option>
+                    </select>
+                    <input type="text" id="auth-otp" placeholder="6-digit OTP" inputmode="numeric" autocomplete="one-time-code" maxlength="6" style="display: none;">
+                    <input type="password" id="auth-new-password" placeholder="New password (optional)" autocomplete="new-password" style="display: none;">
+                    <p class="auth-status" id="auth-status" aria-live="polite"></p>
+                    <button class="send-btn-3d auth-submit" type="submit">Continue</button>
+                    <button class="auth-link-btn" id="forgot-auth-btn" type="button">Forgot username or password?</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container-3d" id="toast-container-3d"></div>
 
     <!-- Footer -->
     <footer class="footer-3d">

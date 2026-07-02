@@ -1,12 +1,17 @@
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import inspect, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import inspect, text, or_
+from sqlalchemy.exc import IntegrityError, OperationalError
 from datetime import datetime
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 import logging
 import math
 import random
+import secrets
+import smtplib
 import requests
 import os
 import pytz
@@ -15,8 +20,41 @@ import time
 import re
 import difflib
 import socket
+import base64
+import uuid
+from email.message import EmailMessage
 from urllib.parse import quote
 from duckduckgo_search import DDGS
+
+
+# ============================================================================
+# LOCAL ENV LOADING
+# ============================================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def load_local_env(path=None, override=True):
+    """Load KEY=value pairs from .env before app/config constants are read."""
+    env_path = path or os.path.join(BASE_DIR, ".env")
+    if not os.path.exists(env_path):
+        return []
+
+    loaded_keys = []
+    with open(env_path, "r", encoding="utf-8") as env_file:
+        for line in env_file:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if override or key not in os.environ:
+                os.environ[key] = value.strip().strip('"').strip("'")
+            loaded_keys.append(key)
+    return loaded_keys
+
+
+LOADED_ENV_KEYS = load_local_env()
 
 # ============================================================================
 # FLASK APP SETUP
@@ -28,6 +66,9 @@ CORS(app)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///denz_chat.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JSON_SORT_KEYS'] = False
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'denz-dev-secret-change-me')
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_UPLOAD_MB', '16')) * 1024 * 1024
+app.config['UPLOAD_FOLDER'] = os.path.join(app.instance_path, 'uploads')
 
 db = SQLAlchemy(app)
 
@@ -38,25 +79,43 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def env_bool(name, default=False):
+    """Parse boolean env flags consistently."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name, default):
+    """Parse integer env values with a safe fallback and log bad values."""
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        logger.warning(f"Invalid integer for {name}; using {default}")
+        return default
+
+
+def mask_secret(value, visible=3):
+    """Show whether a secret is configured without leaking it."""
+    if not value:
+        return "<missing>"
+    if len(value) <= visible:
+        return "***"
+    return f"{value[:visible]}***"
+
+
+class OTPDeliveryError(RuntimeError):
+    """Raised when OTP delivery is configured but the provider rejects/fails it."""
+
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-
-def load_local_env(path=".env"):
-    """Load simple KEY=value pairs for local development."""
-    if not os.path.exists(path):
-        return
-
-    with open(path, "r", encoding="utf-8") as env_file:
-        for line in env_file:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-load_local_env()
 
 ASSISTANT_NAME = "DENZ"
 ASSISTANT_VERSION = "3D-ULTRA-AI-FASTEST"
@@ -78,9 +137,30 @@ Do not reveal hidden reasoning or thinking text. Give only the final answer.
 """
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")  # Upgraded to qwen3:8b for better performance and speed
+OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", OLLAMA_MODEL)
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "15"))  # Increased from 4s to 15s for better responses
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("PORT", os.getenv("FLASK_PORT", "5000")))
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip()
+ADMIN_PHONE = os.getenv("ADMIN_PHONE", "").strip()
+OTP_EXPIRY_SECONDS = env_int("OTP_EXPIRY_SECONDS", 300)
+OTP_RETURN_CODE = env_bool("OTP_RETURN_CODE", False)
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT = env_int("SMTP_PORT", 587)
+SMTP_USERNAME = os.getenv("SMTP_USERNAME", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "no-reply@denz.local").strip()
+SMTP_USE_TLS = env_bool("SMTP_USE_TLS", True)
+SMTP_USE_SSL = env_bool("SMTP_USE_SSL", False)
+SMTP_TIMEOUT = env_int("SMTP_TIMEOUT", 15)
+SMS_PROVIDER = os.getenv("SMS_PROVIDER", "").strip().lower()
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "").strip()
+ALLOWED_DOCUMENT_EXTENSIONS = {"pdf", "docx", "txt", "md"}
+ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif"}
 
 # Weather API
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY", "").strip()
@@ -321,11 +401,40 @@ def cached_response(message_key):
 # DATABASE MODELS
 # ============================================================================
 
+class User(db.Model):
+    """Application user for login, chat ownership, and admin access."""
+    __tablename__ = 'users'
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    email = db.Column(db.String(120), unique=True, nullable=True, index=True)
+    phone_number = db.Column(db.String(20), unique=True, nullable=True, index=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    is_admin = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    last_login = db.Column(db.DateTime)
+
+    def verify_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'username': self.username,
+            'email': self.email,
+            'phone_number': self.phone_number,
+            'is_admin': self.is_admin,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'last_login': self.last_login.isoformat() if self.last_login else None,
+        }
+
+
 class ChatMessage(db.Model):
     """Store chat messages with location data"""
     __tablename__ = 'chat_messages'
     
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
     session_id = db.Column(db.String(100), index=True)
     user_message = db.Column(db.String(1000), nullable=False)
     bot_response = db.Column(db.String(2000), nullable=False)
@@ -411,6 +520,7 @@ class UserSession(db.Model):
     __tablename__ = 'user_sessions'
     
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
     session_id = db.Column(db.String(100), unique=True)
     ip_address = db.Column(db.String(50))
     country = db.Column(db.String(100))
@@ -438,6 +548,448 @@ class UserSession(db.Model):
         }
 
 
+class UploadedFile(db.Model):
+    """Track document and image uploads for users and sessions."""
+    __tablename__ = 'uploaded_files'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    session_id = db.Column(db.String(100), index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    file_type = db.Column(db.String(30), nullable=False)
+    mime_type = db.Column(db.String(100))
+    size_bytes = db.Column(db.Integer, default=0)
+    extracted_text = db.Column(db.Text)
+    analysis = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'filename': self.filename,
+            'file_type': self.file_type,
+            'size_bytes': self.size_bytes,
+            'extracted_text': self.extracted_text,
+            'analysis': self.analysis,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+def get_current_user():
+    user_id = session.get('user_id')
+    if not user_id:
+        return None
+    return db.session.get(User, user_id)
+
+
+def current_user_id():
+    user = get_current_user()
+    return user.id if user else None
+
+
+def generate_otp_code():
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+def normalize_email(email):
+    email = (email or '').strip().lower()
+    if not email:
+        return None
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        return None
+    return email
+
+
+def normalize_phone(phone_number):
+    phone_number = (phone_number or '').strip()
+    if not phone_number:
+        return None
+    cleaned = re.sub(r'[\s().-]', '', phone_number)
+    if cleaned.startswith('00'):
+        cleaned = '+' + cleaned[2:]
+    if not cleaned.startswith('+'):
+        return None
+    if not re.match(r'^\+[1-9]\d{7,14}$', cleaned):
+        return None
+    return cleaned
+
+
+def mask_destination(destination, channel):
+    if channel == 'phone':
+        return f"***{destination[-4:]}" if destination else 'phone'
+    if not destination or '@' not in destination:
+        return 'email'
+    name, domain = destination.split('@', 1)
+    masked_name = name[:2] + '***' if len(name) > 2 else '***'
+    return f"{masked_name}@{domain}"
+
+
+def otp_config_status():
+    """Return masked OTP configuration details for startup/debug logs."""
+    return {
+        "env_file_keys": ",".join(LOADED_ENV_KEYS) if LOADED_ENV_KEYS else "<none>",
+        "otp_return_code": OTP_RETURN_CODE,
+        "smtp_host": SMTP_HOST or "<missing>",
+        "smtp_port": SMTP_PORT,
+        "smtp_username": mask_destination(SMTP_USERNAME, "email") if SMTP_USERNAME else "<missing>",
+        "smtp_password": mask_secret(SMTP_PASSWORD),
+        "smtp_from": SMTP_FROM or "<missing>",
+        "smtp_tls": SMTP_USE_TLS,
+        "smtp_ssl": SMTP_USE_SSL,
+        "sms_provider": SMS_PROVIDER or "<missing>",
+        "twilio_sid": mask_secret(TWILIO_ACCOUNT_SID),
+        "twilio_from": TWILIO_FROM_NUMBER or "<missing>",
+    }
+
+
+def log_otp_config_status():
+    """Log enough OTP config context to debug delivery without leaking secrets."""
+    status = otp_config_status()
+    logger.info(
+        "OTP config loaded: "
+        f"OTP_RETURN_CODE={status['otp_return_code']}, "
+        f"SMTP={status['smtp_username']}@{status['smtp_host']}:{status['smtp_port']}, "
+        f"SMTP_PASSWORD={status['smtp_password']}, "
+        f"Twilio={status['sms_provider']}:{status['twilio_sid']}, "
+        f".env keys={status['env_file_keys']}"
+    )
+
+
+def send_email_otp(destination, code):
+    """Send OTP by Gmail/SMTP. Return False when config/delivery is unavailable."""
+    missing = []
+    if not destination:
+        missing.append("destination email")
+    if not SMTP_HOST:
+        missing.append("SMTP_HOST")
+    if not SMTP_USERNAME:
+        missing.append("SMTP_USERNAME")
+    if not SMTP_PASSWORD:
+        missing.append("SMTP_PASSWORD")
+
+    if missing:
+        logger.warning(f"Email OTP not sent; missing {', '.join(missing)}")
+        return False
+
+    try:
+        message = EmailMessage()
+        message["Subject"] = "Your DENZ login OTP"
+        message["From"] = SMTP_FROM
+        message["To"] = destination
+        message.set_content(
+            f"Your DENZ login OTP is {code}. It expires in {OTP_EXPIRY_SECONDS // 60} minutes."
+        )
+        smtp_class = smtplib.SMTP_SSL if SMTP_USE_SSL else smtplib.SMTP
+        with smtp_class(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as smtp:
+            if SMTP_USE_TLS and not SMTP_USE_SSL:
+                smtp.starttls()
+            smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
+            smtp.send_message(message)
+        logger.info(f"Sent email OTP to {mask_destination(destination, 'email')}")
+        return True
+    except smtplib.SMTPAuthenticationError as error:
+        message = (
+            "Gmail SMTP authentication failed. Use a fresh 16-character Gmail App Password "
+            "for SMTP_PASSWORD, not your normal Gmail password."
+        )
+        logger.error(f"{message} Server response: {error}")
+        if not OTP_RETURN_CODE:
+            raise OTPDeliveryError(message) from error
+    except (smtplib.SMTPException, OSError) as error:
+        message = (
+            f"Email OTP delivery failed via {SMTP_HOST}:{SMTP_PORT} "
+            f"TLS={SMTP_USE_TLS} SSL={SMTP_USE_SSL}: {error}"
+        )
+        logger.error(message)
+        if not OTP_RETURN_CODE:
+            raise OTPDeliveryError(message) from error
+    return False
+
+
+def send_sms_otp(destination, code):
+    """Send OTP by Twilio SMS. Return False when config/delivery is unavailable."""
+    missing = []
+    if SMS_PROVIDER != 'twilio':
+        missing.append("SMS_PROVIDER=twilio")
+    if not TWILIO_ACCOUNT_SID:
+        missing.append("TWILIO_ACCOUNT_SID")
+    if not TWILIO_AUTH_TOKEN:
+        missing.append("TWILIO_AUTH_TOKEN")
+    if not TWILIO_FROM_NUMBER:
+        missing.append("TWILIO_FROM_NUMBER")
+    if not destination:
+        missing.append("destination phone")
+
+    if missing:
+        logger.warning(f"SMS OTP not sent; missing {', '.join(missing)}")
+        return False
+
+    try:
+        response = requests.post(
+            f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
+            data={
+                'From': TWILIO_FROM_NUMBER,
+                'To': destination,
+                'Body': f"Your DENZ login OTP is {code}. It expires in {OTP_EXPIRY_SECONDS // 60} minutes.",
+            },
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+            timeout=10,
+        )
+        response.raise_for_status()
+        logger.info(f"Sent login OTP SMS to {mask_destination(destination, 'phone')}")
+        return True
+    except requests.RequestException as error:
+        response_text = getattr(getattr(error, "response", None), "text", "")
+        message = f"SMS OTP delivery failed through Twilio: {error} {response_text[:300]}"
+        logger.error(message)
+        if not OTP_RETURN_CODE:
+            raise OTPDeliveryError(message) from error
+    return False
+
+
+def send_otp_code(user, code, channel):
+    if channel == 'phone':
+        return send_sms_otp(user.phone_number, code), user.phone_number
+    return send_email_otp(user.email, code), user.email
+
+
+def start_login_otp(user, channel='email'):
+    channel = 'phone' if channel == 'phone' else 'email'
+    if channel == 'email' and not user.email:
+        raise ValueError('No email address is registered for this account.')
+    if channel == 'phone' and not user.phone_number:
+        raise ValueError('No phone number is registered for this account.')
+
+    code = generate_otp_code()
+    sent, destination = send_otp_code(user, code, channel)
+    if not sent and not OTP_RETURN_CODE:
+        log_otp_config_status()
+        raise RuntimeError(
+            'OTP delivery is not configured. Set Gmail SMTP settings or Twilio SMS settings on the server.'
+        )
+
+    session['pending_otp'] = {
+        'user_id': user.id,
+        'channel': channel,
+        'code_hash': generate_password_hash(code),
+        'expires_at': time.time() + OTP_EXPIRY_SECONDS,
+        'attempts': 0,
+    }
+    payload = {
+        'otp_required': True,
+        'message': f"OTP sent to {mask_destination(destination, channel)}.",
+        'delivery': channel,
+        'success': True,
+    }
+    if OTP_RETURN_CODE and not sent:
+        logger.warning("OTP_RETURN_CODE=true; returning login OTP in API response for local testing.")
+        payload['otp'] = code
+        payload['message'] = f'Development OTP: {code}'
+    return payload
+
+
+def start_registration_otp(email, phone_number, channel):
+    channel = 'phone' if channel == 'phone' else 'email'
+    if channel == 'email' and not email:
+        raise ValueError('A valid Gmail/email address is required to verify registration.')
+    if channel == 'phone' and not phone_number:
+        raise ValueError('A valid phone number is required to verify registration.')
+
+    destination = phone_number if channel == 'phone' else email
+    code = generate_otp_code()
+    sent = send_sms_otp(phone_number, code) if channel == 'phone' else send_email_otp(email, code)
+    if not sent and not OTP_RETURN_CODE:
+        log_otp_config_status()
+        raise RuntimeError('OTP delivery is not configured. Set Gmail SMTP or Twilio SMS settings on the server.')
+
+    session.pop('pending_otp', None)
+    session['pending_registration'] = {
+        'email': email,
+        'phone_number': phone_number,
+        'channel': channel,
+        'code_hash': generate_password_hash(code),
+        'expires_at': time.time() + OTP_EXPIRY_SECONDS,
+        'attempts': 0,
+    }
+
+    payload = {
+        'otp_required': True,
+        'registration_pending': True,
+        'message': f"Registration OTP sent to {mask_destination(destination, channel)}.",
+        'delivery': channel,
+        'success': True,
+    }
+    if OTP_RETURN_CODE and not sent:
+        logger.warning("OTP_RETURN_CODE=true; returning registration OTP in API response for local testing.")
+        payload['otp'] = code
+        payload['message'] = f'Development registration OTP: {code}'
+    return payload
+
+
+def start_recovery_otp(user):
+    """Send OTP for username/password recovery using the account's verified contact."""
+    channel = 'email' if user.email else 'phone'
+    code = generate_otp_code()
+    sent, destination = send_otp_code(user, code, channel)
+    if not sent and not OTP_RETURN_CODE:
+        log_otp_config_status()
+        raise RuntimeError('OTP delivery is not configured. Set Gmail SMTP or Twilio SMS settings on the server.')
+
+    session.pop('pending_otp', None)
+    session.pop('pending_registration', None)
+    session['pending_recovery'] = {
+        'user_id': user.id,
+        'channel': channel,
+        'code_hash': generate_password_hash(code),
+        'expires_at': time.time() + OTP_EXPIRY_SECONDS,
+        'attempts': 0,
+    }
+
+    payload = {
+        'otp_required': True,
+        'recovery_pending': True,
+        'message': f"Recovery OTP sent to {mask_destination(destination, channel)}.",
+        'delivery': channel,
+        'success': True,
+    }
+    if OTP_RETURN_CODE and not sent:
+        logger.warning("OTP_RETURN_CODE=true; returning recovery OTP in API response for local testing.")
+        payload['otp'] = code
+        payload['message'] = f'Development recovery OTP: {code}'
+    return payload
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not get_current_user():
+            return jsonify({'error': 'Login required', 'success': False}), 401
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        user = get_current_user()
+        if not user or not user.is_admin:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Admin access required', 'success': False}), 403
+            return redirect(url_for('chat_page'))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def allowed_file(filename, allowed_extensions):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
+
+
+def ensure_upload_folder():
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+
+def save_uploaded_file(file_storage, prefix):
+    ensure_upload_folder()
+    original_name = secure_filename(file_storage.filename or f'{prefix}-upload')
+    extension = original_name.rsplit('.', 1)[1].lower() if '.' in original_name else 'bin'
+    stored_name = f"{prefix}-{uuid.uuid4().hex}.{extension}"
+    stored_path = os.path.join(app.config['UPLOAD_FOLDER'], stored_name)
+    file_storage.save(stored_path)
+    return original_name, stored_name, stored_path
+
+
+def extract_text_from_document(path, extension):
+    extension = extension.lower()
+    if extension in {'txt', 'md'}:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as text_file:
+            return text_file.read()
+
+    if extension == 'pdf':
+        try:
+            from PyPDF2 import PdfReader
+        except Exception:
+            return 'PDF uploaded. Install PyPDF2 to enable text extraction.'
+
+        reader = PdfReader(path)
+        pages = []
+        for page in reader.pages[:20]:
+            pages.append(page.extract_text() or '')
+        return '\n'.join(pages).strip() or 'No selectable text was found in this PDF.'
+
+    if extension == 'docx':
+        try:
+            from docx import Document
+        except Exception:
+            return 'DOCX uploaded. Install python-docx to enable text extraction.'
+
+        document = Document(path)
+        return '\n'.join(paragraph.text for paragraph in document.paragraphs).strip() or 'No text was found in this DOCX.'
+
+    return ''
+
+
+def summarize_uploaded_text(text):
+    clean_text = re.sub(r'\s+', ' ', (text or '')).strip()
+    if not clean_text:
+        return 'I uploaded the file, but I could not extract readable text from it.'
+
+    excerpt = clean_text[:4000]
+    prompt = (
+        "Summarize this uploaded document in 5 concise bullets, then list any key dates, names, or action items.\n\n"
+        f"{excerpt}"
+    )
+    try:
+        return get_ollama_response_ultra_fast(
+            prompt,
+            {'city': 'Unknown', 'country': 'Unknown', 'latitude': 0, 'longitude': 0, 'timezone': 'UTC'},
+            get_neutral_weather(),
+            'UTC',
+            [],
+            None,
+            None,
+        )
+    except Exception as error:
+        logger.warning(f"Document summary fallback used: {error}")
+        return clean_text[:900]
+
+
+def analyze_image_file(path, prompt):
+    prompt = prompt or 'Describe this image. Mention visible text, objects, scene, and anything notable.'
+    try:
+        with open(path, 'rb') as image_file:
+            encoded = base64.b64encode(image_file.read()).decode('ascii')
+
+        response = requests.post(
+            f"{OLLAMA_URL}/api/generate",
+            json={
+                'model': OLLAMA_VISION_MODEL,
+                'prompt': prompt,
+                'images': [encoded],
+                'stream': False,
+                'think': False,
+            },
+            timeout=max(OLLAMA_TIMEOUT, 30),
+        )
+        response.raise_for_status()
+        answer = response.json().get('response', '').strip()
+        if answer:
+            return answer
+    except Exception as error:
+        logger.warning(f"Vision model analysis fallback used: {error}")
+
+    try:
+        from PIL import Image
+        with Image.open(path) as image:
+            width, height = image.size
+            return (
+                f"Image uploaded successfully. Size: {width}x{height}px, format: {image.format}. "
+                "Set OLLAMA_VISION_MODEL to a vision-capable Ollama model for detailed visual analysis."
+            )
+    except Exception:
+        return 'Image uploaded successfully. Set OLLAMA_VISION_MODEL to a vision-capable Ollama model for detailed visual analysis.'
+
+
 def initialize_database():
     """Create database tables and add missing columns for older DB files."""
     with app.app_context():
@@ -451,9 +1003,17 @@ def initialize_database():
         inspector = inspect(db.engine)
 
         def add_missing_columns(table_name, migrations):
+            current_inspector = inspect(db.engine)
+            if not current_inspector.has_table(table_name):
+                db.create_all()
+                current_inspector = inspect(db.engine)
+            if not current_inspector.has_table(table_name):
+                logger.warning(f"Skipping migration for missing table: {table_name}")
+                return
+
             existing_columns = {
                 column['name']
-                for column in inspector.get_columns(table_name)
+                for column in current_inspector.get_columns(table_name)
             }
             added_columns = []
 
@@ -469,6 +1029,7 @@ def initialize_database():
                 logger.info(f"Updated {table_name}: {', '.join(added_columns)}")
 
         add_missing_columns(ChatMessage.__tablename__, {
+            'user_id': 'INTEGER',
             'session_id': 'VARCHAR(100)',
             'ai_model': 'VARCHAR(50)',
             'user_location': 'VARCHAR(200)',
@@ -477,6 +1038,7 @@ def initialize_database():
             'weather_data': 'JSON',
         })
         add_missing_columns(UserSession.__tablename__, {
+            'user_id': 'INTEGER',
             'ip_address': 'VARCHAR(50)',
             'country': 'VARCHAR(100)',
             'city': 'VARCHAR(100)',
@@ -484,6 +1046,38 @@ def initialize_database():
             'longitude': 'FLOAT',
             'messages_count': 'INTEGER DEFAULT 0',
         })
+        add_missing_columns(User.__tablename__, {
+            'phone_number': 'VARCHAR(20)',
+        })
+
+        admin_email = normalize_email(ADMIN_EMAIL)
+        admin_phone = normalize_phone(ADMIN_PHONE)
+        admin = User.query.filter_by(username=ADMIN_USERNAME).first()
+        if not admin:
+            try:
+                db.session.add(User(
+                    username=ADMIN_USERNAME,
+                    email=admin_email,
+                    phone_number=admin_phone,
+                    password_hash=generate_password_hash(ADMIN_PASSWORD),
+                    is_admin=True,
+                ))
+                db.session.commit()
+                logger.info(f"Created default admin user '{ADMIN_USERNAME}'")
+            except IntegrityError:
+                db.session.rollback()
+                logger.info(f"Default admin user '{ADMIN_USERNAME}' already exists")
+        else:
+            changed = False
+            if admin_email and not admin.email:
+                admin.email = admin_email
+                changed = True
+            if admin_phone and not admin.phone_number:
+                admin.phone_number = admin_phone
+                changed = True
+            if changed:
+                db.session.commit()
+                logger.info(f"Updated admin OTP destination for '{ADMIN_USERNAME}'")
 
 
 # ============================================================================
@@ -2070,6 +2664,12 @@ def chat_page():
     return render_template('chat.html')
 
 
+@app.route('/admin')
+@admin_required
+def admin_dashboard_page():
+    return render_template('admin.html')
+
+
 @app.route('/about')
 def about():
     return render_template('about.html')
@@ -2080,11 +2680,405 @@ def serve_static(filename):
     return send_from_directory('static', filename)
 
 
-def save_chat_message_to_db(session_id, user_message, bot_response, effect, location_data, timezone, user_ip, weather_data):
+# ============================================================================
+# AUTH API
+# ============================================================================
+
+@app.route('/api/auth/register', methods=['POST'])
+def register_user():
+    try:
+        data = request.get_json() or {}
+        email = normalize_email(data.get('email'))
+        phone_number = None
+        otp_channel = 'email'
+
+        if not email:
+            return jsonify({'error': 'Enter a valid email address for OTP.', 'success': False}), 400
+
+        existing_filters = []
+        if email:
+            existing_filters.append(User.email == email)
+        if phone_number:
+            existing_filters.append(User.phone_number == phone_number)
+        existing = User.query.filter(or_(*existing_filters)).first()
+        if existing:
+            return jsonify({'error': 'That email or phone is already registered.', 'success': False}), 409
+
+        otp_payload = start_registration_otp(
+            email=email,
+            phone_number=phone_number,
+            channel=otp_channel,
+        )
+        return jsonify(otp_payload), 201
+    except ValueError as error:
+        db.session.rollback()
+        return jsonify({'error': str(error), 'success': False}), 400
+    except OTPDeliveryError as error:
+        db.session.rollback()
+        return jsonify({'error': str(error), 'success': False}), 502
+    except RuntimeError as error:
+        db.session.rollback()
+        logger.error(f"OTP delivery not configured: {error}")
+        return jsonify({'error': str(error), 'success': False}), 503
+    except Exception as error:
+        db.session.rollback()
+        logger.error(f"Register error: {error}")
+        return jsonify({'error': 'Registration failed', 'success': False}), 500
+
+
+@app.route('/api/auth/complete-registration', methods=['POST'])
+def complete_registration():
+    try:
+        data = request.get_json() or {}
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+        code = re.sub(r'\D', '', data.get('otp') or data.get('code') or '')
+        pending = session.get('pending_registration') or {}
+
+        if not pending:
+            return jsonify({'error': 'No verified registration is pending. Start registration again.', 'success': False}), 400
+        if time.time() > float(pending.get('expires_at', 0)):
+            session.pop('pending_registration', None)
+            return jsonify({'error': 'OTP expired. Start registration again.', 'success': False}), 400
+        if len(code) != 6:
+            return jsonify({'error': 'Enter the 6-digit OTP.', 'success': False}), 400
+        if len(username) < 3 or len(password) < 6:
+            return jsonify({'error': 'Username must be 3+ chars and password 6+ chars.', 'success': False}), 400
+
+        attempts = int(pending.get('attempts', 0)) + 1
+        pending['attempts'] = attempts
+        session['pending_registration'] = pending
+        if attempts > 5:
+            session.pop('pending_registration', None)
+            return jsonify({'error': 'Too many OTP attempts. Start registration again.', 'success': False}), 429
+        if not check_password_hash(pending.get('code_hash', ''), code):
+            return jsonify({'error': 'Incorrect OTP.', 'success': False}), 401
+
+        duplicate_filters = [User.username == username]
+        if pending.get('email'):
+            duplicate_filters.append(User.email == pending['email'])
+        if pending.get('phone_number'):
+            duplicate_filters.append(User.phone_number == pending['phone_number'])
+        if User.query.filter(or_(*duplicate_filters)).first():
+            return jsonify({'error': 'That username, email, or phone is already registered.', 'success': False}), 409
+
+        user = User(
+            username=username,
+            email=pending.get('email'),
+            phone_number=pending.get('phone_number'),
+            password_hash=generate_password_hash(password),
+            is_admin=False,
+            last_login=datetime.now(),
+        )
+        db.session.add(user)
+        db.session.commit()
+        session.pop('pending_registration', None)
+        session['user_id'] = user.id
+        return jsonify({'user': user.to_dict(), 'success': True}), 200
+    except Exception as error:
+        db.session.rollback()
+        logger.error(f"Complete registration error: {error}")
+        return jsonify({'error': 'Registration completion failed', 'success': False}), 500
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login_user():
+    try:
+        data = request.get_json() or {}
+        identifier = (data.get('username') or data.get('email') or '').strip()
+        password = data.get('password') or ''
+
+        normalized_email = normalize_email(identifier)
+        normalized_phone = normalize_phone(identifier)
+        filters = [User.username == identifier]
+        if normalized_email:
+            filters.append(User.email == normalized_email)
+        if normalized_phone:
+            filters.append(User.phone_number == normalized_phone)
+        user = User.query.filter(or_(*filters)).first()
+        if not user or not user.verify_password(password):
+            return jsonify({'error': 'Invalid username or password', 'success': False}), 401
+
+        otp_channel = 'email' if user.email else 'phone'
+        return jsonify(start_login_otp(user, otp_channel)), 200
+    except ValueError as error:
+        return jsonify({'error': str(error), 'success': False}), 400
+    except OTPDeliveryError as error:
+        return jsonify({'error': str(error), 'success': False}), 502
+    except RuntimeError as error:
+        logger.error(f"OTP delivery not configured: {error}")
+        return jsonify({'error': str(error), 'success': False}), 503
+    except Exception as error:
+        logger.error(f"Login error: {error}")
+        return jsonify({'error': 'Login failed', 'success': False}), 500
+
+
+@app.route('/api/auth/recovery/start', methods=['POST'])
+def start_account_recovery():
+    try:
+        data = request.get_json() or {}
+        identifier = (data.get('identifier') or data.get('email') or data.get('phone') or '').strip()
+        normalized_email = normalize_email(identifier)
+        normalized_phone = normalize_phone(identifier)
+
+        filters = []
+        if normalized_email:
+            filters.append(User.email == normalized_email)
+        if normalized_phone:
+            filters.append(User.phone_number == normalized_phone)
+        if not filters:
+            return jsonify({'error': 'Enter a valid registered email or phone number.', 'success': False}), 400
+
+        user = User.query.filter(or_(*filters)).first()
+        if not user:
+            return jsonify({'error': 'No account found for that email or phone.', 'success': False}), 404
+
+        return jsonify(start_recovery_otp(user)), 200
+    except OTPDeliveryError as error:
+        return jsonify({'error': str(error), 'success': False}), 502
+    except RuntimeError as error:
+        logger.error(f"Recovery OTP delivery not configured: {error}")
+        return jsonify({'error': str(error), 'success': False}), 503
+    except Exception as error:
+        logger.error(f"Recovery start error: {error}")
+        return jsonify({'error': 'Recovery failed to start', 'success': False}), 500
+
+
+@app.route('/api/auth/recovery/complete', methods=['POST'])
+def complete_account_recovery():
+    try:
+        data = request.get_json() or {}
+        code = re.sub(r'\D', '', data.get('otp') or data.get('code') or '')
+        new_password = data.get('new_password') or data.get('password') or ''
+        pending = session.get('pending_recovery') or {}
+
+        if not pending:
+            return jsonify({'error': 'No recovery is pending. Start recovery again.', 'success': False}), 400
+        if time.time() > float(pending.get('expires_at', 0)):
+            session.pop('pending_recovery', None)
+            return jsonify({'error': 'OTP expired. Start recovery again.', 'success': False}), 400
+        if len(code) != 6:
+            return jsonify({'error': 'Enter the 6-digit OTP.', 'success': False}), 400
+
+        attempts = int(pending.get('attempts', 0)) + 1
+        pending['attempts'] = attempts
+        session['pending_recovery'] = pending
+        if attempts > 5:
+            session.pop('pending_recovery', None)
+            return jsonify({'error': 'Too many OTP attempts. Start recovery again.', 'success': False}), 429
+        if not check_password_hash(pending.get('code_hash', ''), code):
+            return jsonify({'error': 'Incorrect OTP.', 'success': False}), 401
+
+        user = db.session.get(User, pending.get('user_id'))
+        if not user:
+            session.pop('pending_recovery', None)
+            return jsonify({'error': 'Account not found. Start recovery again.', 'success': False}), 400
+
+        password_updated = False
+        if new_password:
+            if len(new_password) < 6:
+                return jsonify({'error': 'New password must be at least 6 characters.', 'success': False}), 400
+            user.password_hash = generate_password_hash(new_password)
+            password_updated = True
+            db.session.commit()
+
+        session.pop('pending_recovery', None)
+        return jsonify({
+            'username': user.username,
+            'password_updated': password_updated,
+            'message': 'Recovery complete.',
+            'success': True,
+        }), 200
+    except Exception as error:
+        db.session.rollback()
+        logger.error(f"Recovery complete error: {error}")
+        return jsonify({'error': 'Recovery failed', 'success': False}), 500
+
+
+@app.route('/api/auth/verify-otp', methods=['POST'])
+def verify_login_otp():
+    try:
+        data = request.get_json() or {}
+        code = re.sub(r'\D', '', data.get('otp') or data.get('code') or '')
+        pending = session.get('pending_otp') or {}
+
+        if not pending:
+            return jsonify({'error': 'No OTP login is pending. Start login again.', 'success': False}), 400
+        if time.time() > float(pending.get('expires_at', 0)):
+            session.pop('pending_otp', None)
+            return jsonify({'error': 'OTP expired. Start login again.', 'success': False}), 400
+        if len(code) != 6:
+            return jsonify({'error': 'Enter the 6-digit OTP.', 'success': False}), 400
+
+        attempts = int(pending.get('attempts', 0)) + 1
+        pending['attempts'] = attempts
+        session['pending_otp'] = pending
+        if attempts > 5:
+            session.pop('pending_otp', None)
+            return jsonify({'error': 'Too many OTP attempts. Start login again.', 'success': False}), 429
+
+        if not check_password_hash(pending.get('code_hash', ''), code):
+            return jsonify({'error': 'Incorrect OTP.', 'success': False}), 401
+
+        user = db.session.get(User, pending.get('user_id'))
+        if not user:
+            session.pop('pending_otp', None)
+            return jsonify({'error': 'User not found. Start login again.', 'success': False}), 400
+
+        user.last_login = datetime.now()
+        db.session.commit()
+        session.pop('pending_otp', None)
+        session['user_id'] = user.id
+        return jsonify({'user': user.to_dict(), 'success': True}), 200
+    except Exception as error:
+        logger.error(f"OTP verify error: {error}")
+        return jsonify({'error': 'OTP verification failed', 'success': False}), 500
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout_user():
+    session.pop('user_id', None)
+    session.pop('pending_otp', None)
+    session.pop('pending_registration', None)
+    session.pop('pending_recovery', None)
+    return jsonify({'success': True}), 200
+
+
+@app.route('/api/auth/me', methods=['GET'])
+def auth_me():
+    user = get_current_user()
+    return jsonify({'user': user.to_dict() if user else None, 'authenticated': bool(user), 'success': True}), 200
+
+
+@app.route('/api/auth/otp/config', methods=['GET'])
+def otp_config_check():
+    """Expose masked OTP config so local setup problems are easy to diagnose."""
+    return jsonify({'config': otp_config_status(), 'success': True}), 200
+
+
+# ============================================================================
+# FILE AND IMAGE API
+# ============================================================================
+
+@app.route('/api/files/upload', methods=['POST'])
+def upload_document():
+    try:
+        uploaded = request.files.get('file')
+        session_id = request.form.get('session_id') or 'unknown'
+        if not uploaded or not uploaded.filename:
+            return jsonify({'error': 'No file uploaded', 'success': False}), 400
+        if not allowed_file(uploaded.filename, ALLOWED_DOCUMENT_EXTENSIONS):
+            return jsonify({'error': 'Only PDF, DOCX, TXT, and MD files are supported.', 'success': False}), 400
+
+        original_name, stored_name, stored_path = save_uploaded_file(uploaded, 'doc')
+        extension = original_name.rsplit('.', 1)[1].lower()
+        extracted_text = extract_text_from_document(stored_path, extension)
+        summary = summarize_uploaded_text(extracted_text)
+
+        record = UploadedFile(
+            user_id=current_user_id(),
+            session_id=session_id,
+            filename=original_name,
+            stored_filename=stored_name,
+            file_type=extension,
+            mime_type=uploaded.mimetype,
+            size_bytes=os.path.getsize(stored_path),
+            extracted_text=extracted_text[:12000] if extracted_text else '',
+            analysis=summary,
+        )
+        db.session.add(record)
+        db.session.commit()
+
+        return jsonify({'file': record.to_dict(), 'summary': summary, 'success': True}), 200
+    except Exception as error:
+        db.session.rollback()
+        logger.error(f"Upload error: {error}")
+        return jsonify({'error': 'File upload failed', 'success': False}), 500
+
+
+@app.route('/api/images/analyze', methods=['POST'])
+def analyze_image():
+    try:
+        uploaded = request.files.get('image') or request.files.get('file')
+        session_id = request.form.get('session_id') or 'unknown'
+        prompt = (request.form.get('prompt') or '').strip()
+        if not uploaded or not uploaded.filename:
+            return jsonify({'error': 'No image uploaded', 'success': False}), 400
+        if not allowed_file(uploaded.filename, ALLOWED_IMAGE_EXTENSIONS):
+            return jsonify({'error': 'Only PNG, JPG, JPEG, WEBP, and GIF images are supported.', 'success': False}), 400
+
+        original_name, stored_name, stored_path = save_uploaded_file(uploaded, 'image')
+        analysis = analyze_image_file(stored_path, prompt)
+        extension = original_name.rsplit('.', 1)[1].lower()
+
+        record = UploadedFile(
+            user_id=current_user_id(),
+            session_id=session_id,
+            filename=original_name,
+            stored_filename=stored_name,
+            file_type=extension,
+            mime_type=uploaded.mimetype,
+            size_bytes=os.path.getsize(stored_path),
+            analysis=analysis,
+        )
+        db.session.add(record)
+        db.session.commit()
+
+        return jsonify({'file': record.to_dict(), 'analysis': analysis, 'success': True}), 200
+    except Exception as error:
+        db.session.rollback()
+        logger.error(f"Image analysis error: {error}")
+        return jsonify({'error': 'Image analysis failed', 'success': False}), 500
+
+
+@app.route('/api/uploads', methods=['GET'])
+def list_uploads():
+    try:
+        user_id = current_user_id()
+        session_id = request.args.get('session_id', '').strip()
+        query = UploadedFile.query
+        if user_id:
+            query = query.filter_by(user_id=user_id)
+        elif session_id:
+            query = query.filter_by(session_id=session_id)
+        else:
+            return jsonify({'uploads': [], 'success': True}), 200
+        uploads = query.order_by(UploadedFile.created_at.desc()).limit(50).all()
+        return jsonify({'uploads': [item.to_dict() for item in uploads], 'success': True}), 200
+    except Exception:
+        return jsonify({'uploads': [], 'success': False}), 500
+
+
+@app.route('/api/admin/dashboard', methods=['GET'])
+@admin_required
+def admin_dashboard_data():
+    try:
+        users = User.query.order_by(User.created_at.desc()).limit(20).all()
+        recent_messages = ChatMessage.query.order_by(ChatMessage.timestamp.desc()).limit(20).all()
+        recent_uploads = UploadedFile.query.order_by(UploadedFile.created_at.desc()).limit(20).all()
+        return jsonify({
+            'stats': {
+                'users': User.query.count(),
+                'messages': ChatMessage.query.count(),
+                'sessions': UserSession.query.count(),
+                'uploads': UploadedFile.query.count(),
+            },
+            'users': [user.to_dict() for user in users],
+            'messages': [message.to_dict() for message in recent_messages],
+            'uploads': [upload.to_dict() for upload in recent_uploads],
+            'success': True,
+        }), 200
+    except Exception as error:
+        logger.error(f"Admin dashboard error: {error}")
+        return jsonify({'error': 'Admin dashboard failed', 'success': False}), 500
+
+
+def save_chat_message_to_db(session_id, user_message, bot_response, effect, location_data, timezone, user_ip, weather_data, user_id=None):
     """Persist a chat turn and keep user-session counters in sync."""
     with app.app_context():
         try:
             chat_msg = ChatMessage(
+                user_id=user_id,
                 session_id=session_id,
                 user_message=user_message,
                 bot_response=bot_response,
@@ -2099,10 +3093,13 @@ def save_chat_message_to_db(session_id, user_message, bot_response, effect, loca
 
             session = UserSession.query.filter_by(session_id=session_id).first()
             if session:
+                if user_id and not session.user_id:
+                    session.user_id = user_id
                 session.messages_count += 1
                 session.last_active = datetime.now()
             else:
                 session = UserSession(
+                    user_id=user_id,
                     session_id=session_id,
                     ip_address=user_ip,
                     country=location_data['country'],
@@ -2189,6 +3186,7 @@ def api_chat():
         
         data = request.get_json()
         user_ip = get_user_ip(request)
+        user_id = current_user_id()
         
         if not data:
             return jsonify({'reply': 'No data received', 'success': False}), 400
@@ -2220,6 +3218,14 @@ def api_chat():
                 get_pending_weather_question_from_memory(session_id, user_ip)
                 or get_pending_weather_question(chat_history)
             )
+        context_state = get_session_context(session_id)
+        if (
+            pending_weather_question
+            and context_state.get('last_intent')
+            and context_state.get('last_intent') != 'weather'
+            and not is_weather_question(user_message)
+        ):
+            pending_weather_question = None
         if (
             not pending_question_part
             and not pending_weather_question
@@ -2361,6 +3367,7 @@ def api_chat():
                 timezone,
                 user_ip,
                 weather_data,
+                user_id,
             )
         else:
             threading.Thread(
@@ -2374,6 +3381,7 @@ def api_chat():
                     timezone,
                     user_ip,
                     weather_data,
+                    user_id,
                 ),
                 daemon=True,
             ).start()
@@ -2422,9 +3430,12 @@ def get_chat_history():
     try:
         limit = request.args.get('limit', 50, type=int)
         session_id = request.args.get('session_id', '').strip()
+        user_id = current_user_id()
 
         query = ChatMessage.query
-        if session_id:
+        if user_id:
+            query = query.filter_by(user_id=user_id)
+        elif session_id:
             query = query.filter_by(session_id=session_id)
 
         messages = query.order_by(ChatMessage.timestamp.desc()).limit(limit).all()
@@ -2436,8 +3447,20 @@ def get_chat_history():
 @app.route('/api/chat/clear', methods=['POST'])
 def clear_chat():
     try:
-        count = ChatMessage.query.count()
-        ChatMessage.query.delete()
+        data = request.get_json(silent=True) or {}
+        session_id = data.get('session_id') or request.args.get('session_id', '').strip()
+        user = get_current_user()
+
+        query = ChatMessage.query
+        if user and not user.is_admin:
+            query = query.filter_by(user_id=user.id)
+        elif not user:
+            if not session_id:
+                return jsonify({'error': 'session_id required', 'success': False}), 400
+            query = query.filter_by(session_id=session_id)
+
+        count = query.count()
+        query.delete(synchronize_session=False)
         db.session.commit()
         return jsonify({'message': f'Cleared {count} messages', 'success': True}), 200
     except Exception as e:

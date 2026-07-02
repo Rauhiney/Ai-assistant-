@@ -1279,6 +1279,422 @@ function setupChatInterface() {
     });
 }
 
+async function loadChatHistory() {
+    const container = document.getElementById('chat-messages-3d');
+    if (!container) return;
+
+    const response = await fetchAPI(`/api/chat/history?session_id=${encodeURIComponent(getSessionId())}&limit=50`);
+    if (!response || !response.success || !response.history || response.history.length === 0) return;
+
+    const welcome = container.querySelector('.chat-welcome-3d');
+    if (welcome) welcome.remove();
+    response.history.forEach((message) => {
+        addMessage(message.user, 'user');
+        addMessage(message.bot, 'bot');
+    });
+}
+
+function setupAuthControls() {
+    const authBtn = document.getElementById('auth-btn');
+    const modal = document.getElementById('auth-modal');
+    const closeBtn = document.getElementById('auth-modal-close');
+    const form = document.getElementById('auth-form');
+    const loginTab = document.getElementById('login-tab');
+    const registerTab = document.getElementById('register-tab');
+    const emailInput = document.getElementById('auth-email');
+    const phoneInput = document.getElementById('auth-phone');
+    const otpChannelInput = document.getElementById('auth-otp-channel');
+    const otpInput = document.getElementById('auth-otp');
+    const usernameInput = document.getElementById('auth-username');
+    const passwordInput = document.getElementById('auth-password');
+    const newPasswordInput = document.getElementById('auth-new-password');
+    const title = document.getElementById('auth-modal-title');
+    const adminLink = document.getElementById('admin-nav-link');
+    const status = document.getElementById('auth-status');
+    const submitBtn = form ? form.querySelector('.auth-submit') : null;
+    const forgotBtn = document.getElementById('forgot-auth-btn');
+    const gatedLinks = document.querySelectorAll('[data-auth-trigger]');
+    if (!authBtn && !modal && gatedLinks.length === 0) return;
+
+    let authMode = 'login';
+    let currentUser = null;
+    let pendingRedirect = null;
+    let otpPending = false;
+    let registrationContactVerified = false;
+    let recoveryPending = false;
+
+    if (form) {
+        form.noValidate = true;
+    }
+
+    const syncRegisterContactFields = () => {
+        if (authMode !== 'register' || otpPending) return;
+        if (emailInput) emailInput.style.display = 'block';
+        if (phoneInput) phoneInput.style.display = 'none';
+        if (otpChannelInput) otpChannelInput.value = 'email';
+    };
+
+    const setMode = (mode) => {
+        authMode = mode;
+        otpPending = false;
+        registrationContactVerified = false;
+        recoveryPending = false;
+        const isRegister = mode === 'register';
+        if (title) title.textContent = isRegister ? 'Verify Contact' : 'Login';
+        if (emailInput) {
+            emailInput.placeholder = 'Enter your email';
+            emailInput.style.display = isRegister ? 'block' : 'none';
+        }
+        if (phoneInput) phoneInput.style.display = 'none';
+        if (otpChannelInput) otpChannelInput.style.display = 'none';
+        if (emailInput) emailInput.required = false;
+        if (phoneInput) phoneInput.required = false;
+        if (otpChannelInput) otpChannelInput.required = true;
+        if (otpInput) {
+            otpInput.style.display = 'none';
+            otpInput.required = false;
+            otpInput.value = '';
+        }
+        if (usernameInput) {
+            usernameInput.style.display = isRegister ? 'none' : 'block';
+            usernameInput.required = !isRegister;
+        }
+        if (passwordInput) {
+            passwordInput.style.display = isRegister ? 'none' : 'block';
+            passwordInput.required = !isRegister;
+        }
+        if (newPasswordInput) {
+            newPasswordInput.style.display = 'none';
+            newPasswordInput.required = false;
+            newPasswordInput.value = '';
+        }
+        if (forgotBtn) forgotBtn.style.display = isRegister ? 'none' : 'block';
+        if (loginTab) loginTab.classList.toggle('active', !isRegister);
+        if (registerTab) registerTab.classList.toggle('active', isRegister);
+        syncRegisterContactFields();
+        if (status) {
+            status.textContent = '';
+            status.className = 'auth-status';
+        }
+    };
+
+    const setOtpMode = (message) => {
+        otpPending = true;
+        const isRegister = authMode === 'register';
+        if (title) title.textContent = recoveryPending ? 'Recover Account' : isRegister ? 'Verify OTP and Create Password' : 'Enter OTP';
+        if (emailInput) emailInput.style.display = 'none';
+        if (phoneInput) phoneInput.style.display = 'none';
+        if (otpChannelInput) otpChannelInput.style.display = 'none';
+        if (emailInput) emailInput.required = false;
+        if (phoneInput) phoneInput.required = false;
+        if (otpChannelInput) otpChannelInput.required = false;
+        if (usernameInput) {
+            usernameInput.style.display = isRegister ? 'block' : 'none';
+            usernameInput.required = isRegister;
+        }
+        if (passwordInput) {
+            passwordInput.style.display = isRegister ? 'block' : 'none';
+            passwordInput.required = isRegister;
+        }
+        if (newPasswordInput) {
+            newPasswordInput.style.display = recoveryPending ? 'block' : 'none';
+            newPasswordInput.required = false;
+            newPasswordInput.value = '';
+        }
+        if (otpInput) {
+            otpInput.style.display = 'block';
+            otpInput.required = true;
+            otpInput.value = '';
+            otpInput.focus();
+        }
+        registrationContactVerified = isRegister;
+        if (loginTab) loginTab.classList.add('active');
+        if (registerTab) registerTab.classList.remove('active');
+        setStatus(message || 'Enter the 6-digit OTP.', 'info');
+    };
+
+    const setStatus = (message, type = 'info') => {
+        if (!status) return;
+        status.textContent = message;
+        status.className = `auth-status ${type}`;
+    };
+
+    const updateAuthUi = (user) => {
+        currentUser = user;
+        if (authBtn) authBtn.textContent = user ? `Logout ${user.username}` : 'Login';
+        if (adminLink) adminLink.style.display = user && user.is_admin ? 'inline-flex' : 'none';
+    };
+
+    fetchAPI('/api/auth/me').then((response) => {
+        updateAuthUi(response && response.authenticated ? response.user : null);
+    });
+
+    if (authBtn) {
+        authBtn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            if (currentUser) {
+                await fetch('/api/auth/logout', { method: 'POST' });
+                updateAuthUi(null);
+                showToast('Logged out', 'info', 1800);
+                return;
+            }
+            pendingRedirect = null;
+            if (modal) modal.classList.add('show');
+        });
+    }
+
+    gatedLinks.forEach((link) => {
+        link.addEventListener('click', (event) => {
+            const redirectTo = link.getAttribute('data-auth-redirect') || link.getAttribute('href') || '/chat';
+            if (currentUser) {
+                window.location.href = redirectTo;
+                return;
+            }
+            event.preventDefault();
+            pendingRedirect = redirectTo;
+            setMode('login');
+            if (modal) modal.classList.add('show');
+        });
+    });
+
+    const query = new URLSearchParams(window.location.search);
+    if (query.get('auth') === '1' && modal) {
+        pendingRedirect = query.get('next') || '/chat';
+        modal.classList.add('show');
+    }
+
+    if (closeBtn && modal) {
+        closeBtn.addEventListener('click', () => modal.classList.remove('show'));
+        modal.addEventListener('click', (event) => {
+            if (event.target === modal) modal.classList.remove('show');
+        });
+    }
+
+    if (loginTab) loginTab.addEventListener('click', () => setMode('login'));
+    if (registerTab) registerTab.addEventListener('click', () => setMode('register'));
+    if (otpChannelInput) otpChannelInput.addEventListener('change', syncRegisterContactFields);
+    if (forgotBtn) {
+        forgotBtn.addEventListener('click', () => {
+            authMode = 'recovery';
+            otpPending = false;
+            recoveryPending = false;
+            registrationContactVerified = false;
+            if (title) title.textContent = 'Recover Account';
+            if (emailInput) {
+                emailInput.style.display = 'block';
+                emailInput.placeholder = 'Registered email or phone';
+            }
+            if (phoneInput) phoneInput.style.display = 'none';
+            if (otpChannelInput) otpChannelInput.style.display = 'none';
+            if (usernameInput) usernameInput.style.display = 'none';
+            if (passwordInput) passwordInput.style.display = 'none';
+            if (newPasswordInput) newPasswordInput.style.display = 'none';
+            if (otpInput) otpInput.style.display = 'none';
+            if (forgotBtn) forgotBtn.style.display = 'none';
+            if (loginTab) loginTab.classList.remove('active');
+            if (registerTab) registerTab.classList.remove('active');
+            setStatus('Enter your registered email or phone. You can recover username or set a new password.', 'info');
+            if (emailInput) emailInput.focus();
+        });
+    }
+
+    if (form) {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (submitBtn && submitBtn.disabled) return;
+
+            const payload = otpPending
+                ? {
+                    otp: otpInput?.value.trim(),
+                    username: registrationContactVerified ? usernameInput?.value.trim() : undefined,
+                    password: registrationContactVerified ? passwordInput?.value : undefined,
+                    new_password: recoveryPending ? newPasswordInput?.value : undefined,
+                }
+                : {
+                    username: usernameInput?.value.trim(),
+                    password: passwordInput?.value,
+                };
+            if (!otpPending && authMode === 'register') {
+                payload.email = emailInput?.value.trim();
+                payload.phone_number = '';
+                payload.otp_channel = 'email';
+            }
+
+            if (otpPending && !payload.otp) {
+                setStatus('Enter the OTP code.', 'error');
+                return;
+            }
+
+            if (!otpPending && authMode === 'login' && (!payload.username || !payload.password)) {
+                setStatus('Enter username and password.', 'error');
+                return;
+            }
+
+            if (!otpPending && authMode === 'recovery') {
+                payload.identifier = emailInput?.value.trim();
+                if (!payload.identifier) {
+                    setStatus('Enter your registered email or phone.', 'error');
+                    return;
+                }
+            }
+
+            if (!otpPending && authMode === 'register' && !payload.email && !payload.phone_number) {
+                setStatus('Enter your email to receive OTP.', 'error');
+                return;
+            }
+
+            if (!otpPending && authMode === 'register' && payload.otp_channel === 'email' && !payload.email) {
+                setStatus('Enter an email address for email OTP.', 'error');
+                return;
+            }
+
+            if (!otpPending && authMode === 'register' && payload.otp_channel === 'phone' && !payload.phone_number) {
+                setStatus('Enter a phone number with country code for phone OTP.', 'error');
+                return;
+            }
+
+            if (registrationContactVerified && (!payload.username || !payload.password)) {
+                setStatus('Create a username and password.', 'error');
+                return;
+            }
+
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = otpPending ? 'Verifying...' : authMode === 'register' || authMode === 'recovery' ? 'Send OTP' : 'Logging in...';
+            }
+            setStatus(otpPending ? 'Verifying OTP...' : authMode === 'register' || authMode === 'recovery' ? 'Sending OTP...' : 'Checking your login...', 'info');
+
+            try {
+                const endpoint = registrationContactVerified
+                    ? '/api/auth/complete-registration'
+                    : recoveryPending
+                    ? '/api/auth/recovery/complete'
+                    : otpPending
+                    ? '/api/auth/verify-otp'
+                    : authMode === 'recovery'
+                    ? '/api/auth/recovery/start'
+                    : `/api/auth/${authMode}`;
+                const authResponse = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                const response = await authResponse.json().catch(() => null);
+
+                if (!otpPending && authResponse.ok && response && response.otp_required) {
+                    if (authMode === 'recovery') recoveryPending = true;
+                    setOtpMode(response.message);
+                    showToast('OTP required', 'info', 1800);
+                    return;
+                }
+
+                if (authResponse.ok && response && response.success) {
+                    if (recoveryPending) {
+                        const passwordText = response.password_updated ? ' Password updated.' : '';
+                        setStatus(`Your username is ${response.username}.${passwordText}`, 'success');
+                        showToast('Recovery complete', 'info', 2200);
+                        recoveryPending = false;
+                        otpPending = false;
+                        return;
+                    }
+                    updateAuthUi(response.user);
+                    setStatus('Success. Opening chat...', 'success');
+                    showToast(authMode === 'register' ? 'Account created' : 'Logged in', 'info', 1800);
+                    if (pendingRedirect) {
+                        window.location.href = pendingRedirect;
+                        return;
+                    }
+                    if (modal) modal.classList.remove('show');
+                    await loadChatHistory();
+                } else {
+                    setStatus(response?.error || 'Authentication failed. Try again.', 'error');
+                    showToast(response?.error || 'Authentication failed', 'error', 3500);
+                }
+            } catch (error) {
+                setStatus('Could not reach the server. Make sure Flask is running.', 'error');
+                showToast('Could not reach the server', 'error', 3500);
+            } finally {
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Continue';
+                }
+            }
+        });
+    }
+}
+
+function setupUploadControls() {
+    const fileBtn = document.getElementById('file-upload-btn');
+    const imageBtn = document.getElementById('image-upload-btn');
+    const fileInput = document.getElementById('file-upload-input');
+    const imageInput = document.getElementById('image-upload-input');
+
+    const upload = async (endpoint, fieldName, file) => {
+        const formData = new FormData();
+        formData.append(fieldName, file);
+        formData.append('session_id', getSessionId());
+        addMessage(`Uploaded ${file.name}`, 'user');
+        showToast('Uploading...', 'info', 1200);
+
+        const response = await fetch(endpoint, { method: 'POST', body: formData });
+        const data = await response.json().catch(() => null);
+        if (data && data.success) {
+            addMessage(data.summary || data.analysis || 'Upload complete.', 'bot');
+            showToast('Upload complete', 'info', 1800);
+        } else {
+            addMessage(data?.error || 'Upload failed.', 'bot');
+            showToast('Upload failed', 'error', 3000);
+        }
+    };
+
+    if (fileBtn && fileInput) {
+        fileBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files && fileInput.files[0];
+            if (file) upload('/api/files/upload', 'file', file);
+            fileInput.value = '';
+        });
+    }
+
+    if (imageBtn && imageInput) {
+        imageBtn.addEventListener('click', () => imageInput.click());
+        imageInput.addEventListener('change', () => {
+            const file = imageInput.files && imageInput.files[0];
+            if (file) upload('/api/images/analyze', 'image', file);
+            imageInput.value = '';
+        });
+    }
+}
+
+async function setupAdminDashboard() {
+    const stats = document.getElementById('admin-stats');
+    const users = document.getElementById('admin-users');
+    const uploads = document.getElementById('admin-uploads');
+    const messages = document.getElementById('admin-messages');
+    const refresh = document.getElementById('admin-refresh');
+    if (!stats) return;
+
+    const item = (primary, secondary = '') => `<div class="admin-list-item"><strong>${escapeHtml(primary || '')}</strong><span>${escapeHtml(secondary || '')}</span></div>`;
+
+    const load = async () => {
+        const data = await fetchAPI('/api/admin/dashboard');
+        if (!data || !data.success) {
+            showToast('Admin data unavailable. Login as admin first.', 'error', 3500);
+            return;
+        }
+
+        stats.innerHTML = Object.entries(data.stats).map(([key, value]) => (
+            `<div class="admin-stat"><span>${escapeHtml(key)}</span><strong>${value}</strong></div>`
+        )).join('');
+        users.innerHTML = data.users.map((user) => item(user.username, user.is_admin ? 'Admin' : user.email || 'User')).join('') || item('No users yet');
+        uploads.innerHTML = data.uploads.map((uploadItem) => item(uploadItem.filename, `${uploadItem.file_type} · ${uploadItem.size_bytes} bytes`)).join('') || item('No uploads yet');
+        messages.innerHTML = data.messages.map((message) => item(message.user, message.bot)).join('') || item('No messages yet');
+    };
+
+    if (refresh) refresh.addEventListener('click', load);
+    await load();
+}
+
 /**
  * Update Mini Map
  */
@@ -1752,8 +2168,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const isHomePage = document.querySelector('.landing-page');
         const isChatPage = document.querySelector('.chat-page');
         const isAboutPage = document.querySelector('.about-page');
+        const isAdminPage = document.querySelector('.admin-page');
         
         if (isHomePage) {
+            setupAuthControls();
             // Initialize 3D scene
             if (init3DScene('three-canvas')) {
                 console.log('Home page 3D scene initialized');
@@ -1764,14 +2182,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('Chat page 3D scene initialized');
                 initCurrentLocationMap();
                 setupChatInterface();
+                setupAuthControls();
+                setupUploadControls();
                 setupSettingsModal();
                 setupAvatarControls();
                 setupSuggestions();
+                loadChatHistory();
             } else {
                 setupChatInterface();
+                setupAuthControls();
+                setupUploadControls();
                 setupSettingsModal();
                 setupSuggestions();
+                loadChatHistory();
             }
+        } else if (isAdminPage) {
+            setupAdminDashboard();
         } else if (isAboutPage) {
             // Initialize about 3D scene
             if (init3DScene('three-canvas-about')) {
