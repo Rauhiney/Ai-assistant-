@@ -2464,6 +2464,16 @@ body.light-mode .user-message .message-content {
     background: #ff6b9d;
 }
 
+.ollama-indicator.degraded {
+    background: rgba(74, 158, 255, 0.1);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    color: rgba(74, 158, 255, 0.9);
+}
+
+.ollama-indicator.degraded .dot {
+    background: #4a9eff;
+}
+
 @keyframes pulse-dot {
     0%, 100% {
         opacity: 1;

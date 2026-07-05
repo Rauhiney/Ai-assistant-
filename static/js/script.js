@@ -63,11 +63,13 @@ let OLLAMA_STATUS = {
     ready: false,
     checking: true,
     lastCheck: 0,
+    attempts: 0,
 };
 
 async function checkOllamaReady() {
     try {
-        const response = await fetch('/api/ollama/ready', { timeout: 3000 });
+        OLLAMA_STATUS.attempts += 1;
+        const response = await fetch('/api/ollama/ready');
         OLLAMA_STATUS.ready = response.status === 200;
         OLLAMA_STATUS.checking = false;
         OLLAMA_STATUS.lastCheck = Date.now();
@@ -77,17 +79,17 @@ async function checkOllamaReady() {
             updateOllamaIndicator(true);
         } else {
             console.log('⏳ Ollama is starting up...');
-            updateOllamaIndicator(false);
+            updateOllamaIndicator(false, OLLAMA_STATUS.attempts >= 3);
         }
     } catch (error) {
         console.log('⏳ Checking Ollama...', error.message);
         OLLAMA_STATUS.ready = false;
         OLLAMA_STATUS.checking = false;
-        updateOllamaIndicator(false);
+        updateOllamaIndicator(false, OLLAMA_STATUS.attempts >= 3);
     }
 }
 
-function updateOllamaIndicator(isReady) {
+function updateOllamaIndicator(isReady, degraded = false) {
     const indicator = document.getElementById('ollama-status-indicator');
     if (!indicator) return;
     
@@ -95,6 +97,10 @@ function updateOllamaIndicator(isReady) {
         indicator.className = 'ollama-indicator ready';
         indicator.title = 'Ollama AI is ready';
         indicator.innerHTML = '<span class="dot"></span> Ready';
+    } else if (degraded) {
+        indicator.className = 'ollama-indicator degraded';
+        indicator.title = 'Ollama is unavailable on this deployment. DENZ is using built-in fallback answers.';
+        indicator.innerHTML = '<span class="dot"></span> Basic mode';
     } else {
         indicator.className = 'ollama-indicator loading';
         indicator.title = 'Ollama AI is warming up...';
@@ -108,10 +114,10 @@ if (document.readyState === 'loading') {
         checkOllamaReady();
         // Re-check every 5 seconds if not ready
         const checkInterval = setInterval(() => {
-            if (!OLLAMA_STATUS.ready) {
-                checkOllamaReady();
-            } else {
+            if (OLLAMA_STATUS.ready || OLLAMA_STATUS.attempts >= 3) {
                 clearInterval(checkInterval);
+            } else {
+                checkOllamaReady();
             }
         }, 5000);
     });
