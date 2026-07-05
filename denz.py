@@ -5,6 +5,7 @@ from sqlalchemy import inspect, text, or_
 from sqlalchemy.exc import IntegrityError, OperationalError
 from datetime import datetime
 from functools import wraps
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import logging
@@ -53,14 +54,15 @@ def load_local_env(path=None, override=True):
             loaded_keys.append(key)
     return loaded_keys
 
-
-LOADED_ENV_KEYS = load_local_env()
+LOAD_DOTENV_OVERRIDE = os.getenv("LOAD_DOTENV_OVERRIDE", "false").strip().lower() in {"1", "true", "yes", "on"}
+LOADED_ENV_KEYS = load_local_env(override=LOAD_DOTENV_OVERRIDE)
 
 # ============================================================================
 # FLASK APP SETUP
 # ============================================================================
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 CORS(app)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///denz_chat.db'
@@ -111,6 +113,12 @@ def mask_secret(value, visible=3):
 
 class OTPDeliveryError(RuntimeError):
     """Raised when OTP delivery is configured but the provider rejects/fails it."""
+
+
+app.config['SESSION_COOKIE_SECURE'] = env_bool('SESSION_COOKIE_SECURE', env_bool('PRODUCTION', False))
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = os.getenv('SESSION_COOKIE_SAMESITE', 'Lax')
+app.config['PREFERRED_URL_SCHEME'] = os.getenv('PREFERRED_URL_SCHEME', 'https' if app.config['SESSION_COOKIE_SECURE'] else 'http')
 
 
 # ============================================================================
@@ -3544,7 +3552,11 @@ def get_assistant_info():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Comprehensive health check including Ollama status"""
+    """Application health check for deployment platforms.
+
+    Ollama readiness is reported here, but it does not make the web process
+    unhealthy because the app has local fallback responses.
+    """
     try:
         ollama = {
             'connected': False,
@@ -3566,13 +3578,16 @@ def health_check():
             ollama['error'] = str(ollama_error)
 
         return jsonify({
-            'status': 'healthy' if ollama['connected'] else 'degraded',
+            'status': 'healthy',
+            'dependencies': {
+                'ollama': 'ready' if ollama.get('ready') else 'degraded',
+            },
             'service': ASSISTANT_NAME,
             'version': ASSISTANT_VERSION,
             'ollama': ollama,
             'timestamp': datetime.now().isoformat(),
             'success': True
-        }), 200 if ollama['connected'] else 503
+        }), 200
     except Exception as e:
         return jsonify({'status': 'unhealthy', 'success': False}), 500
 
@@ -3742,17 +3757,19 @@ if __name__ == '__main__':
             logger.error(f"❌ DB error: {e}")
     
     # Warm up Ollama in the background so web/mobile clients can connect immediately.
-    threading.Thread(target=warmup_ollama, daemon=True).start()
-    ollama_ready = True
-    
-    if ollama_ready:
-        logger.info("✅ Ollama is ready for requests!")
+    if env_bool("START_OLLAMA_WARMUP", True):
+        threading.Thread(target=warmup_ollama, daemon=True).start()
+        logger.info("Ollama warmup started in the background.")
     else:
-        logger.warning("⚠️ Ollama warmup failed, but server starting anyway. Requests may fail initially.")
-    
+        logger.info("Ollama warmup disabled by START_OLLAMA_WARMUP=false.")
     lan_ip = get_lan_ip()
     logger.info(f"🌐 Flask local:  http://localhost:{FLASK_PORT}")
     logger.info(f"📱 Mobile/LAN:   http://{lan_ip}:{FLASK_PORT}")
     logger.info("="*70 + "\n")
     
-    app.run(debug=True, host=FLASK_HOST, port=FLASK_PORT, use_reloader=False)
+    app.run(
+        debug=env_bool("FLASK_DEBUG", False),
+        host=FLASK_HOST,
+        port=FLASK_PORT,
+        use_reloader=False,
+    )
