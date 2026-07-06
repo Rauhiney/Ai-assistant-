@@ -206,9 +206,34 @@ WEATHER_KEYWORDS = [
 ]
 CAPITAL_KEYWORDS = [
     "capital of",
+    "captial of",
     "state capital",
     "capital city",
+    "captial",
 ]
+CAPITAL_LOOKUP = {
+    "india": ("India", "New Delhi"),
+    "himachal": ("Himachal Pradesh", "Shimla"),
+    "himachal pradesh": ("Himachal Pradesh", "Shimla"),
+    "hp": ("Himachal Pradesh", "Shimla"),
+    "punjab": ("Punjab", "Chandigarh"),
+    "haryana": ("Haryana", "Chandigarh"),
+    "uttarakhand": ("Uttarakhand", "Dehradun"),
+    "uttar pradesh": ("Uttar Pradesh", "Lucknow"),
+    "rajasthan": ("Rajasthan", "Jaipur"),
+    "delhi": ("Delhi", "New Delhi"),
+    "maharashtra": ("Maharashtra", "Mumbai"),
+    "gujarat": ("Gujarat", "Gandhinagar"),
+    "karnataka": ("Karnataka", "Bengaluru"),
+    "tamil nadu": ("Tamil Nadu", "Chennai"),
+    "kerala": ("Kerala", "Thiruvananthapuram"),
+    "west bengal": ("West Bengal", "Kolkata"),
+    "bihar": ("Bihar", "Patna"),
+    "jharkhand": ("Jharkhand", "Ranchi"),
+    "odisha": ("Odisha", "Bhubaneswar"),
+    "assam": ("Assam", "Dispur"),
+    "goa": ("Goa", "Panaji"),
+}
 NON_LOCATION_WORDS = {
     'what', 'whats', 'what is', 'current', 'the current', 'today', 'now',
     'right now', 'currently', 'please', 'pls', 'weather', 'temperature',
@@ -318,8 +343,12 @@ def is_short_followup(message, context):
     text = normalize_conversation_text(message)
     if not context or not context.get('last_intent'):
         return False
-    if is_capital_query(text):
+    if is_capital_query(text) and extract_capital_subject(text):
         return False
+    if context.get('last_intent') == 'capital' and text in {'capital', 'captial', 'what is capital', 'what is captial', 'what is the capital'}:
+        return True
+    if context.get('last_intent') == 'capital' and normalize_entity_from_text(text):
+        return True
     if text in FOLLOWUP_REFERENCE_TERMS:
         return True
 
@@ -353,6 +382,14 @@ def resolve_followup_message(message, session_id):
     last_intent = context.get('last_intent')
     last_entity = context.get('last_entity')
     last_topic = context.get('last_topic')
+    if last_intent == 'capital' and normalized in {'capital', 'captial', 'what is capital', 'what is captial', 'what is the capital'}:
+        target = last_entity or last_topic
+        if target:
+            return f'capital of {target}'
+    if last_intent == 'capital':
+        target = extract_capital_subject(normalized) or normalize_entity_from_text(normalized) or last_entity or last_topic
+        if target:
+            return f'capital of {target}'
     if normalized == 'capital' and last_entity and 'india' in last_entity.lower():
         return 'capital of india'
     if last_intent == 'weather':
@@ -380,7 +417,8 @@ def resolve_followup_message(message, session_id):
 def update_conversation_memory(session_id, user_message, ai_response, effective_message, weather_question=False, requested_weather_location=None):
     context = get_session_context(session_id)
     intent = infer_user_intent(effective_message)
-    entity = requested_weather_location or extract_weather_location(effective_message) or guess_weather_location(effective_message) or normalize_entity_from_text(effective_message)
+    capital_subject = extract_capital_subject(effective_message) if intent == 'capital' else None
+    entity = capital_subject or requested_weather_location or extract_weather_location(effective_message) or guess_weather_location(effective_message) or normalize_entity_from_text(effective_message)
     topic = entity or normalize_entity_from_text(user_message)
     is_followup = is_short_followup(user_message, context)
     if not entity and is_followup:
@@ -1436,11 +1474,51 @@ def is_weather_question(message):
 
 
 def is_capital_query(message):
-    user_message = message.lower()
+    user_message = message.lower().replace('captial', 'capital')
     return any(
-        word in user_message
-        for word in CAPITAL_KEYWORDS
-    )
+        phrase.replace('captial', 'capital') in user_message
+        for phrase in CAPITAL_KEYWORDS
+    ) or bool(re.search(r'\bwhat\s+is\s+(?:the\s+)?capital\b', user_message))
+
+
+def normalize_capital_subject(subject):
+    if not subject:
+        return None
+    normalized = normalize_conversation_text(subject)
+    normalized = re.sub(r'\b(state|capital|city|of|the|is|what|which|tell|me|please|pls)\b', ' ', normalized)
+    normalized = re.sub(r'[^a-z\s-]', ' ', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    return normalized or None
+
+
+def extract_capital_subject(message):
+    normalized = normalize_conversation_text(message).replace('captial', 'capital')
+    patterns = [
+        r'\bcapital\s+(?:city\s+)?(?:of|for)\s+([a-zA-Z\s-]+)$',
+        r'\b(?:what|which)\s+is\s+(?:the\s+)?capital\s+(?:city\s+)?(?:of|for)\s+([a-zA-Z\s-]+)$',
+        r'\bstate\s+capital\s+(?:of|for)\s+([a-zA-Z\s-]+)$',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if match:
+            return normalize_capital_subject(match.group(1))
+    return None
+
+
+def answer_capital_query(message, session_id=None):
+    subject = extract_capital_subject(message)
+    context = get_session_context(session_id) if session_id else {}
+    if not subject and context.get('last_intent') == 'capital':
+        subject = normalize_capital_subject(context.get('last_entity') or context.get('last_topic'))
+    if not subject:
+        return None
+
+    place = CAPITAL_LOOKUP.get(subject)
+    if not place:
+        return None
+
+    place_name, capital = place
+    return f"The capital of {place_name} is {capital}."
 
 
 def is_valid_weather_location(location):
@@ -3350,17 +3428,18 @@ def api_chat():
                 weather_data = get_neutral_weather()
                 ai_response, map_data = run_location_tool(effective_message, location_data)
             elif is_capital_query_request:
-                # Capital query code
                 weather_data = get_neutral_weather()
-                ai_response = get_ollama_response_ultra_fast(
-                    effective_message,
-                    location_data,
-                    weather_data,
-                    local_time,
-                    chat_history,
-                    session_id,
-                    web_search_results,  # Pass web search results
-                )
+                ai_response = answer_capital_query(effective_message, session_id)
+                if not ai_response:
+                    ai_response = get_ollama_response_ultra_fast(
+                        effective_message,
+                        location_data,
+                        weather_data,
+                        local_time,
+                        chat_history,
+                        session_id,
+                        web_search_results,
+                    )
             elif is_weather:
                 # Weather code
                 if not requested_weather_location and not has_real_location(location_data):

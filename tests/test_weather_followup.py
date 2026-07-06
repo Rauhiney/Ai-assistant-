@@ -139,10 +139,19 @@ class WeatherFollowUpTest(unittest.TestCase):
             reply = self.post("capital of india")
             follow_up = self.post("punjab")
 
-        self.assertEqual(reply["reply"], "Generic chat response")
-        self.assertEqual(follow_up["reply"], "Generic chat response")
-        self.assertEqual(ollama_mock.call_count, 2)
+        self.assertEqual(reply["reply"], "The capital of India is New Delhi.")
+        self.assertEqual(follow_up["reply"], "The capital of Punjab is Chandigarh.")
+        self.assertEqual(ollama_mock.call_count, 0)
         self.assertEqual(weather_mock.call_count, 1)
+
+    def test_capital_typo_followup_uses_previous_state(self):
+        first = self.post("what is capital of himachal")
+        second = self.post("what is captial")
+
+        self.assertEqual(first["reply"], "The capital of Himachal Pradesh is Shimla.")
+        self.assertEqual(second["reply"], "The capital of Himachal Pradesh is Shimla.")
+        self.assertEqual(first["routing"]["tool"], "location")
+        self.assertEqual(second["routing"]["tool"], "location")
 
     def test_map_query_uses_location_tool_without_ollama(self):
         fallback_location = {
