@@ -21,11 +21,11 @@ import time
 import re
 import difflib
 import socket
-import base64
 import uuid
 from email.message import EmailMessage
 from urllib.parse import quote
 from duckduckgo_search import DDGS
+from services.ai_service import AIServiceError, ai_service
 
 
 # ============================================================================
@@ -147,6 +147,8 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")  # Upgraded to qwen3:8b for better performance and speed
 OLLAMA_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", OLLAMA_MODEL)
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "15"))  # Increased from 4s to 15s for better responses
+AI_PROVIDER = ai_service.provider_name
+AI_MODEL = ai_service.model_name
 FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
 FLASK_PORT = int(os.getenv("PORT", os.getenv("FLASK_PORT", "5000")))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
@@ -190,7 +192,7 @@ response_cache = {}
 pending_weather_requests = {}
 conversation_memory = {}
 geolocation_backoff_until = {}
-ollama_backoff_until = 0
+ai_backoff_until = 0
 GEOLOCATION_RATE_LIMIT_BACKOFF_SECONDS = 15 * 60
 OLLAMA_FAILURE_BACKOFF_SECONDS = 60
 
@@ -1014,25 +1016,10 @@ def summarize_uploaded_text(text):
 def analyze_image_file(path, prompt):
     prompt = prompt or 'Describe this image. Mention visible text, objects, scene, and anything notable.'
     try:
-        with open(path, 'rb') as image_file:
-            encoded = base64.b64encode(image_file.read()).decode('ascii')
-
-        response = requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={
-                'model': OLLAMA_VISION_MODEL,
-                'prompt': prompt,
-                'images': [encoded],
-                'stream': False,
-                'think': False,
-            },
-            timeout=max(OLLAMA_TIMEOUT, 30),
-        )
-        response.raise_for_status()
-        answer = response.json().get('response', '').strip()
+        answer = ai_service.analyze_image(path, prompt, timeout=max(OLLAMA_TIMEOUT, 30))
         if answer:
-            return answer
-    except Exception as error:
+            return clean_ai_response(answer)
+    except AIServiceError as error:
         logger.warning(f"Vision model analysis fallback used: {error}")
 
     try:
@@ -1041,10 +1028,10 @@ def analyze_image_file(path, prompt):
             width, height = image.size
             return (
                 f"Image uploaded successfully. Size: {width}x{height}px, format: {image.format}. "
-                "Set OLLAMA_VISION_MODEL to a vision-capable Ollama model for detailed visual analysis."
+                "Configure a vision-capable AI provider model for detailed visual analysis."
             )
     except Exception:
-        return 'Image uploaded successfully. Set OLLAMA_VISION_MODEL to a vision-capable Ollama model for detailed visual analysis.'
+        return 'Image uploaded successfully. Configure a vision-capable AI provider model for detailed visual analysis.'
 
 
 def initialize_database():
@@ -2420,8 +2407,8 @@ def get_instant_response(user_message):
     return None
 
 
-def clean_ollama_response(response_text):
-    """Remove Qwen/Ollama thinking traces and return only the user-facing answer."""
+def clean_ai_response(response_text):
+    """Remove provider thinking traces and return only the user-facing answer."""
     if not response_text:
         return ""
 
@@ -2435,26 +2422,31 @@ def clean_ollama_response(response_text):
     return cleaned.strip()
 
 
+def clean_ollama_response(response_text):
+    """Backward-compatible alias for older tests/helpers."""
+    return clean_ai_response(response_text)
+
+
 def is_ollama_in_backoff():
-    return time.time() < ollama_backoff_until
+    return time.time() < ai_backoff_until
 
 
 def mark_ollama_unavailable():
-    global ollama_backoff_until
-    ollama_backoff_until = time.time() + OLLAMA_FAILURE_BACKOFF_SECONDS
+    global ai_backoff_until
+    ai_backoff_until = time.time() + OLLAMA_FAILURE_BACKOFF_SECONDS
 
 
-def get_ollama_response_ultra_fast(user_message, location_data, weather_data, local_time, chat_history=None, session_id=None, web_search_results=None):
-    """Ollama response with retry mechanism and better error handling"""
+def get_ai_response_ultra_fast(user_message, location_data, weather_data, local_time, chat_history=None, session_id=None, web_search_results=None):
+    """AI response with retry mechanism, caching, and provider fallback."""
     chat_history = chat_history or []
 
     if is_ollama_in_backoff():
-        logger.warning("Ollama is in temporary backoff; using fallback response")
+        logger.warning("AI provider is in temporary backoff; using fallback response")
         return generate_smart_fallback(user_message, location_data, weather_data, local_time, web_search_results)
 
     # Check response cache
     history_key = "|".join(f"{item.user_message}:{item.bot_response}" for item in chat_history[-3:])
-    message_key = f"with_history_v1_{history_key}_{user_message}"
+    message_key = f"{ai_service.provider_name}_{ai_service.model_name}_with_history_v1_{history_key}_{user_message}"
     cached_resp = cached_response(message_key)
     if cached_resp:
         logger.info("🚀 Response cache hit")
@@ -2487,26 +2479,14 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
             logger.info(f"📤 Ollama request (attempt {attempt + 1}/{max_retries}, complexity: {'HIGH' if is_complex else 'LOW'}, timeout: {timeout}s)")
             logger.info(f"   Question: {user_message[:60]}")
             
-            response = requests.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "think": False,
-                    "keep_alive": "10m",
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": num_predict,
-                        "num_ctx": 8192 if is_complex else 1024,
-                    },
-                },
-                timeout=timeout
+            ai_response = clean_ai_response(
+                ai_service.generate_text(
+                    prompt,
+                    temperature=0.3,
+                    max_tokens=num_predict,
+                    timeout=timeout,
+                )
             )
-            response.raise_for_status()
-            
-            data = response.json()
-            ai_response = clean_ollama_response(data.get('response', ''))
             
             if ai_response:
                 if len(ai_response) > max_response_length:
@@ -2555,8 +2535,21 @@ def get_ollama_response_ultra_fast(user_message, location_data, weather_data, lo
     return generate_smart_fallback(user_message, location_data, weather_data, local_time, web_search_results)
 
 
+def get_ollama_response_ultra_fast(user_message, location_data, weather_data, local_time, chat_history=None, session_id=None, web_search_results=None):
+    """Backward-compatible wrapper for older route/test names."""
+    return get_ai_response_ultra_fast(
+        user_message,
+        location_data,
+        weather_data,
+        local_time,
+        chat_history,
+        session_id,
+        web_search_results,
+    )
+
+
 def generate_smart_fallback(user_message, location_data, weather_data, local_time, web_search_results=None):
-    """Generate intelligent fallback responses when Ollama fails, instead of generic responses."""
+    """Generate intelligent fallback responses when the AI provider fails."""
     msg = user_message.lower()
     math_fallback = generate_math_fallback_response(user_message)
     if math_fallback:
@@ -3140,7 +3133,7 @@ def save_chat_message_to_db(session_id, user_message, bot_response, effect, loca
                 user_message=user_message,
                 bot_response=bot_response,
                 effect_triggered=effect,
-                ai_model=OLLAMA_MODEL,
+                ai_model=AI_MODEL,
                 user_location=f"{location_data['city']}, {location_data['country']}",
                 user_timezone=timezone,
                 user_ip=user_ip,
@@ -3458,7 +3451,8 @@ def api_chat():
             'weather': weather_data,
             'local_time': local_time,
             'success': True,
-            'model': OLLAMA_MODEL,
+            'provider': AI_PROVIDER,
+            'model': AI_MODEL,
             'response_time': response_time,
             'routing': routing_info,  # Include routing info for debugging
             'web_search': {
@@ -3581,10 +3575,10 @@ def get_assistant_info():
         return jsonify({
             'name': ASSISTANT_NAME,
             'version': ASSISTANT_VERSION,
-            'ollama_url': OLLAMA_URL,
-            'ollama_model': OLLAMA_MODEL,
+            'ai_provider': AI_PROVIDER,
+            'ai_model': AI_MODEL,
             'capabilities': [
-                'Qwen3 8B local AI chat',
+                'Provider-based AI chat',
                 'Agent/router tool selection',
                 'Web search',
                 'Live weather',
@@ -3603,37 +3597,21 @@ def get_assistant_info():
 def health_check():
     """Application health check for deployment platforms.
 
-    Ollama readiness is reported here, but it does not make the web process
+    AI readiness is reported here, but it does not make the web process
     unhealthy because the app has local fallback responses.
     """
     try:
-        ollama = {
-            'connected': False,
-            'url': OLLAMA_URL,
-            'model': OLLAMA_MODEL,
-            'ready': False,
-            'models': []
-        }
-        try:
-            ollama_response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
-            ollama['connected'] = ollama_response.status_code == 200
-            
-            if ollama['connected']:
-                models = ollama_response.json().get('models', [])
-                ollama['models'] = [model.get('name') for model in models]
-                ollama['model_available'] = OLLAMA_MODEL in ollama['models']
-                ollama['ready'] = ollama['model_available']
-        except Exception as ollama_error:
-            ollama['error'] = str(ollama_error)
+        ai_status = ai_service.health()
 
         return jsonify({
             'status': 'healthy',
             'dependencies': {
-                'ollama': 'ready' if ollama.get('ready') else 'degraded',
+                'ai': 'ready' if ai_status.get('ready') else 'degraded',
             },
             'service': ASSISTANT_NAME,
             'version': ASSISTANT_VERSION,
-            'ollama': ollama,
+            'ai': ai_status,
+            'ollama': ai_status if ai_status.get('provider') == 'ollama' else None,
             'timestamp': datetime.now().isoformat(),
             'success': True
         }), 200
@@ -3643,26 +3621,22 @@ def health_check():
 
 @app.route('/api/ollama/ready', methods=['GET'])
 def ollama_ready():
-    """Quick check if Ollama is ready to answer questions"""
+    """Backward-compatible readiness endpoint used by the existing frontend."""
     try:
-        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
-        is_ready = response.status_code == 200
-        
-        if is_ready:
-            models = [model.get('name') for model in response.json().get('models', [])]
-            is_ready = OLLAMA_MODEL in models
-        
+        status = ai_service.health()
+        is_ready = bool(status.get('ready'))
         return jsonify({
             'ready': is_ready,
-            'url': OLLAMA_URL,
-            'model': OLLAMA_MODEL,
+            'provider': status.get('provider'),
+            'model': status.get('model'),
+            'status': status,
             'success': True
         }), 200 if is_ready else 503
     except Exception as e:
         return jsonify({
             'ready': False,
             'error': str(e),
-            'url': OLLAMA_URL,
+            'provider': AI_PROVIDER,
             'success': False
         }), 503
 
@@ -3806,11 +3780,11 @@ if __name__ == '__main__':
             logger.error(f"❌ DB error: {e}")
     
     # Warm up Ollama in the background so web/mobile clients can connect immediately.
-    if env_bool("START_OLLAMA_WARMUP", True):
+    if AI_PROVIDER == "ollama" and env_bool("START_OLLAMA_WARMUP", True):
         threading.Thread(target=warmup_ollama, daemon=True).start()
         logger.info("Ollama warmup started in the background.")
     else:
-        logger.info("Ollama warmup disabled by START_OLLAMA_WARMUP=false.")
+        logger.info(f"AI warmup skipped for provider={AI_PROVIDER}.")
     lan_ip = get_lan_ip()
     logger.info(f"🌐 Flask local:  http://localhost:{FLASK_PORT}")
     logger.info(f"📱 Mobile/LAN:   http://{lan_ip}:{FLASK_PORT}")

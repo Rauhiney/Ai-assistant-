@@ -15,6 +15,16 @@ services:
         value: "false"
       - key: LOAD_DOTENV_OVERRIDE
         value: "false"
+      - key: AI_PROVIDER
+        value: "groq"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: "llama-3.3-70b-versatile"
+      - key: GROQ_VISION_MODEL
+        sync: false
+      - key: GROQ_TIMEOUT
+        value: "45"
       - key: SECRET_KEY
         generateValue: true
       - key: SMTP_HOST
