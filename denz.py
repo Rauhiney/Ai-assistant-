@@ -163,6 +163,8 @@ SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "no-reply@denz.local").strip
 SMTP_USE_TLS = env_bool("SMTP_USE_TLS", True)
 SMTP_USE_SSL = env_bool("SMTP_USE_SSL", False)
 SMTP_TIMEOUT = env_int("SMTP_TIMEOUT", 15)
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+RESEND_FROM = os.getenv("RESEND_FROM", SMTP_FROM).strip()
 SMS_PROVIDER = os.getenv("SMS_PROVIDER", "").strip().lower()
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
@@ -645,6 +647,8 @@ def otp_config_status():
         "smtp_from": SMTP_FROM or "<missing>",
         "smtp_tls": SMTP_USE_TLS,
         "smtp_ssl": SMTP_USE_SSL,
+        "resend_api_key": mask_secret(RESEND_API_KEY),
+        "resend_from": RESEND_FROM or "<missing>",
         "sms_provider": SMS_PROVIDER or "<missing>",
         "twilio_sid": mask_secret(TWILIO_ACCOUNT_SID),
         "twilio_from": TWILIO_FROM_NUMBER or "<missing>",
@@ -659,13 +663,58 @@ def log_otp_config_status():
         f"OTP_RETURN_CODE={status['otp_return_code']}, "
         f"SMTP={status['smtp_username']}@{status['smtp_host']}:{status['smtp_port']}, "
         f"SMTP_PASSWORD={status['smtp_password']}, "
+        f"Resend={status['resend_api_key']}:{status['resend_from']}, "
         f"Twilio={status['sms_provider']}:{status['twilio_sid']}, "
         f".env keys={status['env_file_keys']}"
     )
 
 
+def send_resend_email_otp(destination, code):
+    """Send OTP through Resend over HTTPS, which works on hosts that block SMTP."""
+    missing = []
+    if not destination:
+        missing.append("destination email")
+    if not RESEND_API_KEY:
+        missing.append("RESEND_API_KEY")
+    if not RESEND_FROM:
+        missing.append("RESEND_FROM")
+
+    if missing:
+        logger.warning(f"Resend OTP not sent; missing {', '.join(missing)}")
+        return False
+
+    try:
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": RESEND_FROM,
+                "to": [destination],
+                "subject": "Your DENZ login OTP",
+                "text": f"Your DENZ login OTP is {code}. It expires in {OTP_EXPIRY_SECONDS // 60} minutes.",
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        logger.info(f"Sent email OTP through Resend to {mask_destination(destination, 'email')}")
+        return True
+    except requests.RequestException as error:
+        response_text = getattr(getattr(error, "response", None), "text", "")
+        message = f"Resend OTP delivery failed: {error} {response_text[:300]}"
+        logger.error(message)
+        if not OTP_RETURN_CODE:
+            raise OTPDeliveryError(message) from error
+    return False
+
+
 def send_email_otp(destination, code):
-    """Send OTP by Gmail/SMTP. Return False when config/delivery is unavailable."""
+    """Send OTP by HTTPS email provider or Gmail/SMTP."""
+    if RESEND_API_KEY:
+        return send_resend_email_otp(destination, code)
+
     missing = []
     if not destination:
         missing.append("destination email")
