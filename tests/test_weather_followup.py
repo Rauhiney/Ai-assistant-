@@ -238,7 +238,7 @@ class WeatherFollowUpTest(unittest.TestCase):
         search_mock.assert_called_once()
         self.assertEqual(ollama_mock.call_args.args[6], search_results)
 
-    def test_ollama_failure_uses_search_fallback_for_general_questions(self):
+    def test_fallback_does_not_search_for_normal_factual_questions(self):
         search_results = [
             {
                 "rank": 1,
@@ -256,15 +256,14 @@ class WeatherFollowUpTest(unittest.TestCase):
                 "12:00",
             )
 
-        self.assertIn("web results", reply)
-        self.assertIn("Python is a programming language.", reply)
-        search_mock.assert_called_once_with("what is python", max_results=3)
+        self.assertIn("high-level programming language", reply)
+        search_mock.assert_not_called()
 
-    def test_ollama_failure_uses_wikipedia_after_search_failure(self):
+    def test_wikipedia_fallback_requires_explicit_wiki_request(self):
         with patch("denz.perform_web_search", return_value=[]), \
              patch("denz.fetch_wikipedia_summary", return_value="Python: Python is a programming language.") as wiki_mock:
             reply = denz.generate_smart_fallback(
-                "what is python",
+                "wikipedia python",
                 {},
                 denz.get_neutral_weather(),
                 "12:00",

@@ -128,13 +128,16 @@ app.config['PREFERRED_URL_SCHEME'] = os.getenv('PREFERRED_URL_SCHEME', 'https' i
 ASSISTANT_NAME = "DENZ"
 ASSISTANT_VERSION = "3D-ULTRA-AI-FASTEST"
 SYSTEM_PROMPT = """
-You are DENZ, a smart professional AI assistant.
-Answer the user's exact question directly.
-Be concise, clear, and natural.
-For factual questions, give the direct answer first, then a short explanation only if needed.
-Do not add random sources, Wikipedia links, or unrelated information unless the user asks.
-If you are unsure, say so instead of guessing.
-Use simple language.
+You are DENZ, a professional AI virtual assistant.
+You are not a chatbot. You act like a personal desktop assistant.
+Answer the user's exact request directly.
+Keep replies short, useful, and natural.
+For factual questions, give the answer first.
+For tasks, give clear steps.
+Do not use Wikipedia/search unless the user asks for web/source/latest information.
+Do not mention that you are an AI language model.
+Do not give unrelated information.
+If unsure, ask one short clarification question.
 Use tool results supplied by the backend for live weather, location/maps, and web search only when relevant.
 If the user asks for code, provide complete code.
 Do not reveal hidden reasoning or thinking text. Give only the final answer.
@@ -1785,17 +1788,17 @@ def format_web_search_response(results, original_query):
 
 
 def should_try_search_fallback(message):
-    """Use web snippets when the local model is unavailable for factual questions."""
+    """Use web snippets only when the user explicitly asks for web/source/latest info."""
     msg = message.lower()
     if is_weather_question(msg) or is_capital_query(msg):
         return False
 
-    factual_markers = (
-        'what', 'who', 'where', 'when', 'why', 'how', 'define', 'meaning',
-        'explain', 'tell me about', 'information about', 'details about',
-        'latest', 'current', 'news', 'search', 'find',
+    explicit_search_markers = (
+        'search', 'find online', 'look up', 'web search', 'google',
+        'source', 'sources', 'with sources', 'cite', 'citation',
+        'latest', 'current news', 'news', 'today news', 'recent news',
     )
-    return any(marker in msg for marker in factual_markers)
+    return any(marker in msg for marker in explicit_search_markers)
 
 
 def generate_search_fallback_response(user_message, web_search_results=None):
@@ -2048,18 +2051,21 @@ def generate_structured_fallback_response(user_message):
 
 
 def generate_knowledge_fallback_response(user_message):
-    """Answer factual questions when both Ollama and search are unavailable."""
+    """Answer factual questions without automatically becoming a wiki/search bot."""
     topic = extract_knowledge_topic(user_message)
     if not topic:
         return None
 
-    wiki_summary = fetch_wikipedia_summary(topic)
-    if wiki_summary:
-        return wiki_summary
-
     basic_response = get_basic_knowledge_response(topic)
     if basic_response:
         return basic_response
+
+    if any(marker in user_message.lower() for marker in ('wikipedia', 'wiki')):
+        wiki_topic = re.sub(r'\b(wikipedia|wiki)\b', ' ', topic, flags=re.IGNORECASE)
+        wiki_topic = re.sub(r'\s+', ' ', wiki_topic).strip() or topic
+        wiki_summary = fetch_wikipedia_summary(wiki_topic)
+        if wiki_summary:
+            return wiki_summary
 
     return None
 
@@ -2176,9 +2182,10 @@ class ToolRouter:
         
         # Web search queries: explicit search or time-sensitive requests.
         search_keywords = [
-            'search', 'find online', 'look up', 'look for', 'latest',
-            'news', 'current', 'recent', 'today', 'trending', 'upcoming',
-            'price', 'stock', 'score', 'schedule'
+            'search', 'find online', 'look up', 'web search', 'google',
+            'latest', 'news', 'recent news', 'today news',
+            'source', 'sources', 'with sources', 'cite', 'citation',
+            'price today', 'stock price', 'live score',
         ]
         if any(keyword in msg for keyword in search_keywords):
             # Additional check: if it's a factual question about something not in our tools
@@ -2193,12 +2200,12 @@ class ToolRouter:
         """Determine if web search would be beneficial"""
         msg = message.lower()
         
-        # Questions that benefit from real-time information
+        # Only explicit web/source/latest requests should leave normal assistant mode.
         search_queries = [
-            'latest', 'recent', 'new', 'current', 'today', 'news',
-            'trending', 'upcoming', 'schedule', 'announce', 'released',
-            'price', 'stock', 'election', 'score', 'result',
-            'how to', 'tutorial', 'guide', 'best', 'top'
+            'search', 'find online', 'look up', 'web search', 'google',
+            'latest', 'news', 'recent news', 'today news',
+            'source', 'sources', 'with sources', 'cite', 'citation',
+            'price today', 'stock price', 'live score',
         ]
         
         if any(keyword in msg for keyword in search_queries):
@@ -2560,7 +2567,7 @@ def get_ai_response_ultra_fast(user_message, location_data, weather_data, local_
             ai_response = clean_ai_response(
                 ai_service.generate_text(
                     prompt,
-                    temperature=0.3,
+                    temperature=0.2,
                     max_tokens=num_predict,
                     timeout=timeout,
                 )
@@ -3412,6 +3419,7 @@ def api_chat():
             requested_weather_location = extract_weather_location(effective_message) or guess_weather_location(effective_message)
 
         map_data = None
+        response_source = AI_PROVIDER
         if (
             not pending_question_part
             and not user_is_weather_question
@@ -3420,13 +3428,16 @@ def api_chat():
         ):
             weather_data = get_neutral_weather()
             ai_response = INCOMPLETE_QUESTION_REPLY
+            response_source = 'fallback'
         elif instant_response:
             weather_data = get_neutral_weather()
             ai_response = instant_response
+            response_source = 'fallback'
         else:
             if routing_info['use_location'] and not is_capital_query_request:
                 weather_data = get_neutral_weather()
                 ai_response, map_data = run_location_tool(effective_message, location_data)
+                response_source = 'fallback'
             elif is_capital_query_request:
                 weather_data = get_neutral_weather()
                 ai_response = answer_capital_query(effective_message, session_id)
@@ -3440,16 +3451,21 @@ def api_chat():
                         session_id,
                         web_search_results,
                     )
+                    response_source = AI_PROVIDER
+                else:
+                    response_source = 'fallback'
             elif is_weather:
                 # Weather code
                 if not requested_weather_location and not has_real_location(location_data):
                     weather_data = get_neutral_weather()
                     ai_response = "Please share the city or location you want the current weather for, and I will check it for you."
                     remember_pending_weather_question(session_id, user_ip, effective_message)
+                    response_source = 'fallback'
                 elif requested_weather_location:
                     weather_data = get_weather_data_by_city(requested_weather_location)
                     ai_response = format_professional_weather_reply(weather_data)
                     clear_pending_weather_question(session_id, user_ip)
+                    response_source = 'fallback'
                 else:
                     weather_data = get_weather_data(
                         location_data['latitude'], location_data['longitude'],
@@ -3457,6 +3473,7 @@ def api_chat():
                     )
                     ai_response = format_professional_weather_reply(weather_data)
                     clear_pending_weather_question(session_id, user_ip)
+                    response_source = 'fallback'
             else:
                 # General chat with optional web search augmentation
                 weather_data = get_neutral_weather()
@@ -3469,6 +3486,7 @@ def api_chat():
                     session_id,
                     web_search_results,  # Pass web search results for context
                 )
+                response_source = AI_PROVIDER if not web_search_results else 'web'
 
         update_conversation_memory(
             session_id,
@@ -3532,6 +3550,7 @@ def api_chat():
             'success': True,
             'provider': AI_PROVIDER,
             'model': AI_MODEL,
+            'response_source': response_source,
             'response_time': response_time,
             'routing': routing_info,  # Include routing info for debugging
             'web_search': {
@@ -3543,6 +3562,7 @@ def api_chat():
         
         logger.info(f"⚡ Response time: {response_time}s")
         
+        logger.info(f"response_source={response_source} provider={AI_PROVIDER} model={AI_MODEL} response_time={response_time}s")
         return jsonify(response), 200
     
     except Exception as e:

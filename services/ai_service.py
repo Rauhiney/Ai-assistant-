@@ -18,13 +18,16 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-DENZ_SYSTEM_PROMPT = """You are DENZ, a smart professional AI assistant.
-Answer the user's exact question directly.
-Be concise, clear, and natural.
-For factual questions, give the direct answer first, then a short explanation only if needed.
-Do not add random sources, Wikipedia links, or unrelated information unless the user asks.
-If you are unsure, say so instead of guessing.
-Use simple language."""
+DENZ_SYSTEM_PROMPT = """You are DENZ, a professional AI virtual assistant.
+You are not a chatbot. You act like a personal desktop assistant.
+Answer the user's exact request directly.
+Keep replies short, useful, and natural.
+For factual questions, give the answer first.
+For tasks, give clear steps.
+Do not use Wikipedia/search unless the user asks for web/source/latest information.
+Do not mention that you are an AI language model.
+Do not give unrelated information.
+If unsure, ask one short clarification question."""
 
 
 class AIServiceError(RuntimeError):
@@ -74,7 +77,7 @@ class BaseAIProvider:
         self,
         prompt: str,
         *,
-        temperature: float = 0.3,
+        temperature: float = 0.2,
         max_tokens: int = 300,
         timeout: float | None = None,
     ) -> str:
@@ -101,7 +104,7 @@ class OllamaProvider(BaseAIProvider):
         self,
         prompt: str,
         *,
-        temperature: float = 0.3,
+        temperature: float = 0.2,
         max_tokens: int = 300,
         timeout: float | None = None,
     ) -> str:
@@ -122,7 +125,7 @@ class OllamaProvider(BaseAIProvider):
                 "think": False,
                 "keep_alive": "10m",
                 "options": {
-                    "temperature": temperature,
+                    "temperature": min(max(temperature, 0.0), 0.2),
                     "num_predict": max_tokens,
                     "num_ctx": 8192 if max_tokens > 128 else 1024,
                 },
@@ -213,7 +216,7 @@ class GroqProvider(BaseAIProvider):
         self,
         prompt: str,
         *,
-        temperature: float = 0.3,
+        temperature: float = 0.2,
         max_tokens: int = 300,
         timeout: float | None = None,
     ) -> str:
@@ -234,7 +237,7 @@ class GroqProvider(BaseAIProvider):
                     {"role": "system", "content": DENZ_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                "temperature": min(max(temperature, 0.0), 0.3),
+                "temperature": min(max(temperature, 0.0), 0.2),
                 "max_tokens": max_tokens,
             },
             timeout=timeout or self.config.groq_timeout,
