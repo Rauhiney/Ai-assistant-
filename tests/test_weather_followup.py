@@ -43,6 +43,44 @@ class WeatherFollowUpTest(unittest.TestCase):
             )
             return response.get_json()
 
+    def test_browser_location_payload_is_used(self):
+        location = {
+            "city": "Dharamsala",
+            "country": "India",
+            "timezone": "Asia/Kolkata",
+            "source": "browser",
+            "accuracy": 25,
+            "coords": {"lat": 32.219, "lng": 76.323},
+        }
+
+        reply = self.post_with_location("where am i", location)
+
+        self.assertEqual(reply["location"]["city"], "Dharamsala")
+        self.assertEqual(reply["location"]["country"], "India")
+        self.assertEqual(reply["location"]["coords"]["lat"], 32.219)
+
+    def test_ip_source_payload_is_not_treated_as_browser_location(self):
+        ip_estimate = {
+            "city": "Wrong City",
+            "country": "Wrong Country",
+            "timezone": "UTC",
+            "source": "ip",
+            "coords": {"lat": 1.23, "lng": 4.56},
+        }
+        fallback_location = {
+            "city": "Unknown",
+            "country": "Unknown",
+            "latitude": 0,
+            "longitude": 0,
+            "timezone": "UTC",
+        }
+
+        with patch("denz.get_location_from_ip", return_value=fallback_location):
+            reply = self.post_with_location("where am i", ip_estimate)
+
+        self.assertNotEqual(reply["location"]["city"], "Wrong City")
+        self.assertEqual(reply["location"]["city"], "Unknown")
+
     def test_weather_follow_up_reconnects_after_async_save_delay(self):
         fallback_location = {
             "city": "Unknown",

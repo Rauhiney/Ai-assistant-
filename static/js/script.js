@@ -1750,11 +1750,13 @@ function updateGeolocationInterface(location, options = {}) {
         lngElement.textContent = lng.toFixed(5);
     }
 
-    statusElement.textContent = options.status || (hasCoords ? 'Location locked on map' : 'Location unavailable');
+    const sourceLabel = location?.source === 'ip' ? 'Network estimate' : 'Device location';
+    statusElement.textContent = options.status || (hasCoords ? `${sourceLabel} locked on map` : 'Location unavailable');
 }
 
 function setCurrentBrowserLocation(location) {
     if (!location || !location.coords) return;
+    if (location.source && location.source !== 'browser') return;
 
     const lat = Number(location.coords.lat);
     const lng = Number(location.coords.lng);
@@ -1762,6 +1764,7 @@ function setCurrentBrowserLocation(location) {
 
     CURRENT_BROWSER_LOCATION = {
         ...location,
+        source: 'browser',
         coords: { lat, lng },
         capturedAt: Date.now(),
     };
@@ -1779,6 +1782,10 @@ function loadCachedBrowserLocation() {
     try {
         const cached = JSON.parse(localStorage.getItem(LOCATION_STORAGE_KEY) || 'null');
         if (!cached || !cached.capturedAt) return null;
+        if (cached.source && cached.source !== 'browser') {
+            localStorage.removeItem(LOCATION_STORAGE_KEY);
+            return null;
+        }
         if (Date.now() - cached.capturedAt > 10 * 60 * 1000) return null;
         setCurrentBrowserLocation(cached);
         return CURRENT_BROWSER_LOCATION;
@@ -1821,6 +1828,8 @@ async function detectBrowserLocation(options = {}) {
                     city: resolvedPlace?.city || 'Current location',
                     country: resolvedPlace?.country || 'Local device',
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+                    source: 'browser',
+                    accuracy: position.coords.accuracy,
                     coords: { lat, lng },
                 };
 
@@ -1863,6 +1872,7 @@ async function fetchServerLocationForMap(statusPrefix = 'Using network location'
         city: data.location.city,
         country: data.location.country,
         timezone: data.timezone || data.location.timezone,
+        source: 'ip',
         coords: {
             lat: data.location.latitude,
             lng: data.location.longitude,
@@ -1870,7 +1880,6 @@ async function fetchServerLocationForMap(statusPrefix = 'Using network location'
     };
 
     updateMiniMap(location);
-    setCurrentBrowserLocation(location);
     updateGeolocationInterface(location, {
         status: `${statusPrefix}${location.timezone ? ` (${location.timezone})` : ''}`,
     });

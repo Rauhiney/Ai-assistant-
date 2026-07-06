@@ -1318,6 +1318,9 @@ def is_valid_coordinate_pair(latitude, longitude):
 def get_location_from_request_payload(data):
     """Use browser-provided geolocation when the frontend has permission."""
     payload = (data or {}).get('location') or {}
+    source = (payload.get('source') or 'browser').lower()
+    if source not in {'browser', 'device'}:
+        return None
     coords = payload.get('coords') or {}
 
     try:
@@ -1341,6 +1344,7 @@ def get_location_from_request_payload(data):
         'isp': 'Browser geolocation',
         'postal': '',
         'source': 'browser',
+        'accuracy': payload.get('accuracy'),
     }
 
 
