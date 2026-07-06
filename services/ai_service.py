@@ -18,6 +18,14 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+DENZ_SYSTEM_PROMPT = """You are DENZ, a smart professional AI assistant.
+Answer the user's exact question directly.
+Be concise, clear, and natural.
+For factual questions, give the direct answer first, then a short explanation only if needed.
+Do not add random sources, Wikipedia links, or unrelated information unless the user asks.
+If you are unsure, say so instead of guessing.
+Use simple language."""
+
 
 class AIServiceError(RuntimeError):
     """Raised when the configured AI provider cannot complete a request."""
@@ -97,11 +105,19 @@ class OllamaProvider(BaseAIProvider):
         max_tokens: int = 300,
         timeout: float | None = None,
     ) -> str:
+        max_tokens = min(max_tokens, 500)
+        logger.info(
+            "AI request provider=%s model=%s max_tokens=%s temperature=%.2f",
+            self.name,
+            self.model_name,
+            max_tokens,
+            temperature,
+        )
         response = requests.post(
             f"{self.config.ollama_url}/api/generate",
             json={
                 "model": self.config.ollama_model,
-                "prompt": prompt,
+                "prompt": f"{DENZ_SYSTEM_PROMPT}\n\n{prompt}",
                 "stream": False,
                 "think": False,
                 "keep_alive": "10m",
@@ -201,13 +217,24 @@ class GroqProvider(BaseAIProvider):
         max_tokens: int = 300,
         timeout: float | None = None,
     ) -> str:
+        max_tokens = min(max_tokens, 500)
+        logger.info(
+            "AI request provider=%s model=%s max_tokens=%s temperature=%.2f",
+            self.name,
+            self.model_name,
+            max_tokens,
+            temperature,
+        )
         response = requests.post(
             self.api_url,
             headers=self._headers(),
             json={
                 "model": self.config.groq_model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": temperature,
+                "messages": [
+                    {"role": "system", "content": DENZ_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": min(max(temperature, 0.0), 0.3),
                 "max_tokens": max_tokens,
             },
             timeout=timeout or self.config.groq_timeout,
@@ -219,6 +246,7 @@ class GroqProvider(BaseAIProvider):
         return (choices[0].get("message", {}).get("content") or "").strip()
 
     def analyze_image(self, image_path: str, prompt: str, *, timeout: float | None = None) -> str:
+        logger.info("AI image request provider=%s model=%s", self.name, self.config.groq_vision_model)
         mime_type = mimetypes.guess_type(image_path)[0] or "image/jpeg"
         with open(image_path, "rb") as image_file:
             encoded = base64.b64encode(image_file.read()).decode("ascii")
